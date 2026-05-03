@@ -1,0 +1,920 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="light">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>VelyDocs - Anime API Documentation</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Comfortaa:wght@400;600;700&family=IBM+Plex+Mono:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+:root{
+  --bg:#F2F7F5;--bg2:#ffffff;--bg3:#E8EEEB;
+  --text:#1A202C;--text2:#4A5568;
+  --accent:#FAAE2B;--accent2:#E8981A;--accent-soft:rgba(250,174,43,.15);
+  --pink:#FFBDC4;--pink-soft:rgba(255,189,196,.2);
+  --green:#2F855A;--red:#C53030;--orange:#C05621;
+  --border:#CBD5E0;--radius:0px;
+  --font:'Comfortaa',sans-serif;
+  --mono:'IBM Plex Mono',monospace
+}
+[data-theme="dark"]{
+  --bg:#1A202C;--bg2:#2D3748;--bg3:#4A5568;
+  --text:#F2F7F5;--text2:#A0AEC0;
+  --accent:#FAAE2B;--accent2:#F6C860;--accent-soft:rgba(250,174,43,.12);
+  --pink:#FFBDC4;--pink-soft:rgba(255,189,196,.12);
+  --green:#68D391;--red:#FC8181;--orange:#F6AD55;
+  --border:#4A5568;--radius:0px
+}
+body{font-family:var(--mono);background:var(--bg);color:var(--text);display:flex;min-height:100vh;transition:background .3s,color .3s;font-size:14px}
+a{color:var(--accent2);text-decoration:none;font-weight:500}a:hover{text-decoration:underline;color:var(--accent)}
+h1,h2,h3,h4,.sidebar .logo,.topbar h1{font-family:var(--font)}
+
+/* Sidebar */
+.sidebar{width:280px;background:var(--bg2);border-right:3px solid var(--accent);padding:20px 0;position:fixed;top:0;left:0;height:100vh;overflow-y:auto;z-index:100;transition:transform .3s}
+.sidebar .logo{padding:16px 20px;font-size:22px;font-weight:700;letter-spacing:1px;display:flex;align-items:center;gap:8px;border-bottom:3px solid var(--accent);margin-bottom:12px}
+.sidebar .logo span{color:var(--accent);background:var(--accent);color:var(--text);padding:2px 8px;display:inline-block}
+.sidebar .credit{padding:4px 20px 12px;font-size:11px;color:var(--text2);border-bottom:2px solid var(--border);margin-bottom:8px;font-family:var(--mono)}
+.sidebar .section-title{padding:10px 20px;font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:2px;color:var(--accent);margin-top:8px;font-family:var(--mono)}
+.sidebar .nav-item{display:block;padding:7px 20px 7px 32px;font-size:13px;color:var(--text2);cursor:pointer;transition:all .15s;border-left:3px solid transparent;font-family:var(--mono)}
+.sidebar .nav-item:hover{color:var(--text);background:var(--accent-soft);border-left-color:var(--accent)}
+.sidebar .nav-item.active{color:var(--text);background:var(--accent-soft);border-left-color:var(--accent);font-weight:600}
+.sidebar .nav-item .method{display:inline-block;width:38px;font-size:10px;font-weight:700;font-family:var(--mono);margin-right:6px;padding:2px 0;text-align:center}
+.method-get{color:var(--green)}.method-post{color:var(--orange)}
+
+/* Scrollbar saweria style */
+.sidebar::-webkit-scrollbar{width:4px}
+.sidebar::-webkit-scrollbar-track{background:transparent}
+.sidebar::-webkit-scrollbar-thumb{background:var(--accent);border-radius:0}
+
+/* Main */
+.main{margin-left:280px;flex:1;padding:32px 48px;max-width:960px}
+.topbar{display:flex;justify-content:space-between;align-items:center;margin-bottom:32px;gap:16px;flex-wrap:wrap}
+.topbar h1{font-size:28px;font-weight:700;color:var(--text)}
+.topbar h1 em{font-style:normal;color:var(--accent)}
+.topbar .controls{display:flex;gap:8px;align-items:center}
+.toggle-btn{background:var(--accent);border:3px solid var(--text);color:var(--text);padding:6px 16px;border-radius:0;cursor:pointer;font-size:13px;font-family:var(--mono);font-weight:700;transition:all .15s;box-shadow:3px 3px 0 var(--text)}
+.toggle-btn:hover{box-shadow:1px 1px 0 var(--text);transform:translate(2px,2px)}
+.hamburger{display:none;background:var(--accent);border:3px solid var(--text);color:var(--text);padding:6px 10px;border-radius:0;cursor:pointer;font-size:18px;font-weight:700;box-shadow:3px 3px 0 var(--text)}
+
+/* Sections */
+.section{margin-bottom:40px;padding-bottom:32px;border-bottom:2px dashed var(--border)}
+.section:last-child{border-bottom:none}
+.section h2{font-size:20px;font-weight:700;margin-bottom:8px;display:flex;align-items:center;gap:8px}
+.section .desc{color:var(--text2);font-size:14px;margin-bottom:16px;line-height:1.7;font-family:var(--mono)}
+.badge{display:inline-block;font-size:11px;font-weight:700;font-family:var(--mono);padding:4px 10px;letter-spacing:.5px;border:2px solid}
+.badge-get{background:rgba(47,133,90,.1);color:var(--green);border-color:var(--green)}
+.badge-base{background:var(--bg3);color:var(--text);font-size:12px;padding:6px 12px;font-family:var(--mono);word-break:break-all;border:2px solid var(--border);display:inline-block;margin-top:8px}
+
+/* Endpoint cards */
+.endpoint-card{background:var(--bg2);border:3px solid var(--border);margin-bottom:12px;overflow:hidden;transition:border-color .2s}
+.endpoint-card:hover{border-color:var(--accent)}
+.ep-header{display:flex;align-items:center;padding:12px 16px;cursor:pointer;gap:10px;user-select:none}
+.ep-header .ep-method{font-size:11px;font-weight:700;font-family:var(--mono);padding:3px 8px;background:rgba(47,133,90,.12);color:var(--green);min-width:40px;text-align:center;border:2px solid var(--green)}
+.ep-header .ep-path{font-family:var(--mono);font-size:13px;flex:1;word-break:break-all}
+.ep-header .ep-desc{color:var(--text2);font-size:12px;max-width:220px;text-align:right}
+.ep-header .ep-arrow{color:var(--text2);transition:transform .2s;font-size:12px}
+.ep-header .ep-arrow.open{transform:rotate(90deg)}
+.ep-body{padding:0 16px 16px;display:none;border-top:2px solid var(--border)}
+.ep-body.open{display:block}
+.ep-body h4{font-size:12px;font-weight:700;text-transform:uppercase;letter-spacing:1px;color:var(--accent);margin:12px 0 8px;font-family:var(--mono)}
+
+/* Tables */
+.params-table{width:100%;border-collapse:collapse;font-size:13px;border:2px solid var(--border)}
+.params-table th{text-align:left;padding:8px 10px;background:var(--accent-soft);color:var(--text);font-size:11px;text-transform:uppercase;letter-spacing:.5px;font-weight:700;border-bottom:2px solid var(--border)}
+.params-table td{padding:8px 10px;border-bottom:1px solid var(--border)}
+.params-table .param-name{font-family:var(--mono);color:var(--accent2);font-weight:700}
+.params-table .param-req{color:var(--red);font-size:11px;font-weight:700}
+.params-table .param-opt{color:var(--text2);font-size:11px}
+
+/* Try It */
+.try-section{margin-top:12px;background:var(--bg);border:3px solid var(--border);padding:14px}
+.try-section label{display:block;font-size:12px;color:var(--text2);margin-bottom:4px;font-weight:700;font-family:var(--mono);text-transform:uppercase;letter-spacing:.5px}
+.try-section input,.try-section select{width:100%;background:var(--bg2);border:2px solid var(--border);color:var(--text);padding:8px 10px;font-size:13px;font-family:var(--mono);margin-bottom:8px;border-radius:0}
+.try-section input:focus,.try-section select:focus{outline:none;border-color:var(--accent);box-shadow:0 0 0 1px var(--accent)}
+.try-btn{background:var(--accent);color:var(--text);border:3px solid var(--text);padding:8px 24px;cursor:pointer;font-size:13px;font-weight:700;font-family:var(--mono);transition:all .15s;box-shadow:4px 4px 0 var(--text);text-transform:uppercase;letter-spacing:1px}
+.try-btn:hover{box-shadow:2px 2px 0 var(--text);transform:translate(2px,2px)}
+.try-btn:active{box-shadow:0 0 0 var(--text);transform:translate(4px,4px)}
+.try-btn:disabled{opacity:.5;cursor:not-allowed;box-shadow:4px 4px 0 var(--text);transform:none}
+
+/* Response */
+.response-box{margin-top:12px;background:var(--bg2);border:3px solid var(--border);overflow:hidden;display:none}
+.response-box.show{display:block}
+.response-header{display:flex;justify-content:space-between;align-items:center;padding:8px 12px;background:var(--bg3);font-size:12px;border-bottom:2px solid var(--border)}
+.response-header .status{font-weight:700;font-family:var(--mono)}
+.status-ok{color:var(--green)}.status-err{color:var(--red)}
+.response-body{padding:12px;max-height:400px;overflow:auto;font-family:var(--mono);font-size:12px;line-height:1.6;white-space:pre-wrap;word-break:break-all}
+.copy-btn{background:var(--pink);border:2px solid var(--text);color:var(--text);padding:2px 10px;cursor:pointer;font-size:11px;font-family:var(--mono);font-weight:600;box-shadow:2px 2px 0 var(--text);transition:all .1s}
+.copy-btn:hover{box-shadow:1px 1px 0 var(--text);transform:translate(1px,1px)}
+
+/* Intro & Auth boxes */
+.intro-box{background:var(--bg2);border:3px solid var(--border);padding:20px;margin-bottom:16px;position:relative}
+.intro-box::before{content:'';position:absolute;top:-3px;left:-3px;width:40px;height:40px;border-top:4px solid var(--accent);border-left:4px solid var(--accent)}
+.intro-box h3{margin-bottom:8px;font-size:16px;font-family:var(--font);color:var(--accent)}
+.intro-box p{color:var(--text2);font-size:14px;line-height:1.7;margin-bottom:8px;font-family:var(--mono)}
+.intro-box code{background:var(--accent-soft);padding:2px 8px;font-family:var(--mono);font-size:12px;border:1px solid var(--accent);color:var(--text);font-weight:600}
+.auth-warning{background:var(--pink-soft);border:3px solid var(--red);padding:14px 16px;margin-bottom:24px;font-size:13px;line-height:1.7;font-family:var(--mono);position:relative}
+.auth-warning::before{content:'!';position:absolute;top:-12px;left:12px;background:var(--red);color:#fff;width:24px;height:24px;display:flex;align-items:center;justify-content:center;font-weight:900;font-size:14px;font-family:var(--font)}
+.auth-warning strong{color:var(--red)}
+
+.overlay{display:none;position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(26,32,44,.6);z-index:99}
+
+@media(max-width:768px){
+  .sidebar{transform:translateX(-100%)}
+  .sidebar.open{transform:translateX(0)}
+  .overlay.open{display:block}
+  .main{margin-left:0;padding:20px 16px}
+  .hamburger{display:block}
+  .ep-header .ep-desc{display:none}
+}
+</style>
+</head>
+<body>
+<div class="overlay" id="overlay" onclick="toggleSidebar()"></div>
+<aside class="sidebar" id="sidebar">
+  <div class="logo"><span>Vely</span>Docs</div>
+  <div class="credit">by Gxyenn</div>
+
+  <div class="section-title">Getting Started</div>
+  <div class="nav-item active" data-target="intro">Introduction</div>
+  <div class="nav-item" data-target="auth">Authentication</div>
+
+  <div class="section-title">Samehadaku</div>
+  <div class="nav-item" data-target="smhd-home"><span class="method method-get">GET</span> Home</div>
+  <div class="nav-item" data-target="smhd-recent"><span class="method method-get">GET</span> Recent</div>
+  <div class="nav-item" data-target="smhd-search"><span class="method method-get">GET</span> Search</div>
+  <div class="nav-item" data-target="smhd-anime"><span class="method method-get">GET</span> Anime Detail</div>
+  <div class="nav-item" data-target="smhd-episode"><span class="method method-get">GET</span> Episode</div>
+  <div class="nav-item" data-target="smhd-genres"><span class="method method-get">GET</span> Genres</div>
+  <div class="nav-item" data-target="smhd-genre"><span class="method method-get">GET</span> Genre List</div>
+  <div class="nav-item" data-target="smhd-az"><span class="method method-get">GET</span> A-Z List</div>
+  <div class="nav-item" data-target="smhd-schedule"><span class="method method-get">GET</span> Schedule</div>
+  <div class="nav-item" data-target="smhd-popular"><span class="method method-get">GET</span> Popular</div>
+  <div class="nav-item" data-target="smhd-animelist"><span class="method method-get">GET</span> Anime List</div>
+
+  <div class="section-title">Anichin (Anime)</div>
+  <div class="nav-item" data-target="ani-home"><span class="method method-get">GET</span> Home</div>
+  <div class="nav-item" data-target="ani-explore"><span class="method method-get">GET</span> Explore</div>
+  <div class="nav-item" data-target="ani-search"><span class="method method-get">GET</span> Search</div>
+  <div class="nav-item" data-target="ani-anime"><span class="method method-get">GET</span> Anime Detail</div>
+  <div class="nav-item" data-target="ani-episode"><span class="method method-get">GET</span> Episode</div>
+  <div class="nav-item" data-target="ani-movies"><span class="method method-get">GET</span> Movies</div>
+
+  <div class="section-title">Donghua (Anichin.id)</div>
+  <div class="nav-item" data-target="dh-home"><span class="method method-get">GET</span> Home</div>
+  <div class="nav-item" data-target="dh-recent"><span class="method method-get">GET</span> Recent</div>
+  <div class="nav-item" data-target="dh-search"><span class="method method-get">GET</span> Search</div>
+  <div class="nav-item" data-target="dh-series"><span class="method method-get">GET</span> Series Detail</div>
+  <div class="nav-item" data-target="dh-episode"><span class="method method-get">GET</span> Episode</div>
+  <div class="nav-item" data-target="dh-genres"><span class="method method-get">GET</span> Genres</div>
+  <div class="nav-item" data-target="dh-genre"><span class="method method-get">GET</span> Genre List</div>
+  <div class="nav-item" data-target="dh-serieslist"><span class="method method-get">GET</span> Series List</div>
+  <div class="nav-item" data-target="dh-schedule"><span class="method method-get">GET</span> Schedule</div>
+  <div class="nav-item" data-target="dh-az"><span class="method method-get">GET</span> A-Z List</div>
+  <div class="nav-item" data-target="dh-popular"><span class="method method-get">GET</span> Popular</div>
+</aside>
+
+<div class="main" id="main">
+  <div class="topbar">
+    <div style="display:flex;align-items:center;gap:12px">
+      <button class="hamburger" onclick="toggleSidebar()">&#9776;</button>
+      <h1><em>Vely</em>Docs</h1>
+    </div>
+    <div class="controls">
+    <button class="toggle-btn" id="themeToggle" onclick="toggleTheme()">Dark Mode</button>
+    </div>
+  </div>
+
+  <!-- INTRO -->
+  <div class="section" id="intro">
+    <h2>Introduction</h2>
+    <div class="intro-box">
+      <h3>VelyDocs Anime REST API</h3>
+      <p>API scraping untuk sumber anime Indonesia. Mendukung 3 sumber: <strong>Samehadaku</strong> (anime sub Indo), <strong>Anichin.me</strong> (anime), dan <strong>Anichin.id</strong> (donghua/anime China).</p>
+      <p>Base URL: <code id="baseUrl">loading...</code></p>
+      <p>Semua endpoint membutuhkan API key. Tambahkan <code>?apikey=YOUR_KEY</code> atau header <code>X-API-Key: YOUR_KEY</code>.</p>
+      <p>Response format: JSON. Semua response memiliki field <code>status</code>, <code>creator</code>, dan <code>data</code>.</p>
+    </div>
+    <div class="intro-box">
+      <h3>Features</h3>
+      <p>&#8226; Anti-block system dengan rotating User-Agent, random delay, dan smart caching<br>
+         &#8226; Full pagination support di semua endpoint yang mendukung<br>
+         &#8226; Episode streaming servers dan download links<br>
+         &#8226; Search, genre filter, A-Z list, schedule, popular ranking<br>
+         &#8226; Response caching (5 menit) untuk performa optimal</p>
+    </div>
+  </div>
+
+  <!-- AUTH -->
+  <div class="section" id="auth">
+    <h2>Authentication</h2>
+    <div class="auth-warning">
+      <strong>API Key Required</strong> &mdash; Semua endpoint dilindungi API key. Akses tanpa key atau key salah akan ditolak. Mau akses? Beli key-nya.
+    </div>
+    <div class="intro-box">
+      <h3>Cara Penggunaan</h3>
+      <p><strong>Query Parameter:</strong><br><code>GET /api/samehadaku/home?apikey=YOUR_KEY</code></p>
+      <p><strong>Header:</strong><br><code>X-API-Key: YOUR_KEY</code></p>
+      <p><strong>Response tanpa key:</strong></p>
+      <pre style="background:var(--bg3);padding:12px;border-radius:4px;font-family:var(--mono);font-size:12px;overflow-x:auto">{
+  "status": false,
+  "code": 401,
+  "message": "Lu siapa? Mau akses tanpa key? Mimpi kali. Beli dulu key-nya.",
+  "creator": "Gxyenn"
+}</pre>
+    </div>
+  </div>
+
+  <!-- SAMEHADAKU ENDPOINTS -->
+  <div class="section" id="smhd-home">
+    <h2><span class="badge badge-get">GET</span> Samehadaku - Home</h2>
+    <p class="desc">Ambil data homepage: anime terbaru dan ranking popular.</p>
+    <div class="badge-base">/api/samehadaku/home</div>
+    <div class="try-section">
+      <label>API Key</label>
+      <input type="text" class="try-key" placeholder="Masukkan API key">
+      <button class="try-btn" onclick="tryEndpoint(this, '/api/samehadaku/home', {})">Try It</button>
+      <div class="response-box"><div class="response-header"><span class="status"></span><button class="copy-btn" onclick="copyResponse(this)">Copy</button></div><div class="response-body"></div></div>
+    </div>
+  </div>
+
+  <div class="section" id="smhd-recent">
+    <h2><span class="badge badge-get">GET</span> Samehadaku - Recent</h2>
+    <p class="desc">Ambil daftar anime terbaru dengan pagination.</p>
+    <div class="badge-base">/api/samehadaku/recent?page={page}</div>
+    <div class="try-section">
+      <label>API Key</label>
+      <input type="text" class="try-key" placeholder="Masukkan API key">
+      <label>Page</label>
+      <input type="number" class="try-param" data-param="page" placeholder="1" value="1">
+      <button class="try-btn" onclick="tryEndpoint(this, '/api/samehadaku/recent', ['page'])">Try It</button>
+      <div class="response-box"><div class="response-header"><span class="status"></span><button class="copy-btn" onclick="copyResponse(this)">Copy</button></div><div class="response-body"></div></div>
+    </div>
+  </div>
+
+  <div class="section" id="smhd-search">
+    <h2><span class="badge badge-get">GET</span> Samehadaku - Search</h2>
+    <p class="desc">Cari anime berdasarkan keyword. Mendukung pagination.</p>
+    <div class="badge-base">/api/samehadaku/search?q={query}&page={page}</div>
+    <table class="params-table"><thead><tr><th>Parameter</th><th>Type</th><th>Required</th><th>Description</th></tr></thead><tbody>
+      <tr><td class="param-name">q</td><td>string</td><td class="param-req">Yes</td><td>Search keyword</td></tr>
+      <tr><td class="param-name">page</td><td>number</td><td class="param-opt">No</td><td>Page number (default: 1)</td></tr>
+    </tbody></table>
+    <div class="try-section">
+      <label>API Key</label>
+      <input type="text" class="try-key" placeholder="Masukkan API key">
+      <label>Query (q)</label>
+      <input type="text" class="try-param" data-param="q" placeholder="naruto">
+      <label>Page</label>
+      <input type="number" class="try-param" data-param="page" placeholder="1" value="1">
+      <button class="try-btn" onclick="tryEndpoint(this, '/api/samehadaku/search', ['q','page'])">Try It</button>
+      <div class="response-box"><div class="response-header"><span class="status"></span><button class="copy-btn" onclick="copyResponse(this)">Copy</button></div><div class="response-body"></div></div>
+    </div>
+  </div>
+
+  <div class="section" id="smhd-anime">
+    <h2><span class="badge badge-get">GET</span> Samehadaku - Anime Detail</h2>
+    <p class="desc">Ambil detail anime lengkap: info, genre, sinopsis, daftar episode.</p>
+    <div class="badge-base">/api/samehadaku/anime/{slug}</div>
+    <table class="params-table"><thead><tr><th>Parameter</th><th>Type</th><th>Required</th><th>Description</th></tr></thead><tbody>
+      <tr><td class="param-name">slug</td><td>string</td><td class="param-req">Yes</td><td>Anime slug (contoh: one-piece)</td></tr>
+    </tbody></table>
+    <div class="try-section">
+      <label>API Key</label>
+      <input type="text" class="try-key" placeholder="Masukkan API key">
+      <label>Slug</label>
+      <input type="text" class="try-param" data-param="slug" placeholder="one-piece">
+      <button class="try-btn" onclick="tryEndpointPath(this, '/api/samehadaku/anime/{slug}', 'slug')">Try It</button>
+      <div class="response-box"><div class="response-header"><span class="status"></span><button class="copy-btn" onclick="copyResponse(this)">Copy</button></div><div class="response-body"></div></div>
+    </div>
+  </div>
+
+  <div class="section" id="smhd-episode">
+    <h2><span class="badge badge-get">GET</span> Samehadaku - Episode</h2>
+    <p class="desc">Ambil detail episode: streaming servers, download links, navigasi.</p>
+    <div class="badge-base">/api/samehadaku/episode/{slug}</div>
+    <table class="params-table"><thead><tr><th>Parameter</th><th>Type</th><th>Required</th><th>Description</th></tr></thead><tbody>
+      <tr><td class="param-name">slug</td><td>string</td><td class="param-req">Yes</td><td>Episode slug (contoh: one-piece-episode-1159-subtitle-indonesia)</td></tr>
+    </tbody></table>
+    <div class="try-section">
+      <label>API Key</label>
+      <input type="text" class="try-key" placeholder="Masukkan API key">
+      <label>Episode Slug</label>
+      <input type="text" class="try-param" data-param="slug" placeholder="one-piece-episode-1159-subtitle-indonesia">
+      <button class="try-btn" onclick="tryEndpointPath(this, '/api/samehadaku/episode/{slug}', 'slug')">Try It</button>
+      <div class="response-box"><div class="response-header"><span class="status"></span><button class="copy-btn" onclick="copyResponse(this)">Copy</button></div><div class="response-body"></div></div>
+    </div>
+  </div>
+
+  <div class="section" id="smhd-genres">
+    <h2><span class="badge badge-get">GET</span> Samehadaku - Genres</h2>
+    <p class="desc">Ambil daftar semua genre yang tersedia.</p>
+    <div class="badge-base">/api/samehadaku/genres</div>
+    <div class="try-section">
+      <label>API Key</label>
+      <input type="text" class="try-key" placeholder="Masukkan API key">
+      <button class="try-btn" onclick="tryEndpoint(this, '/api/samehadaku/genres', {})">Try It</button>
+      <div class="response-box"><div class="response-header"><span class="status"></span><button class="copy-btn" onclick="copyResponse(this)">Copy</button></div><div class="response-body"></div></div>
+    </div>
+  </div>
+
+  <div class="section" id="smhd-genre">
+    <h2><span class="badge badge-get">GET</span> Samehadaku - Genre List</h2>
+    <p class="desc">Ambil daftar anime berdasarkan genre. Mendukung pagination.</p>
+    <div class="badge-base">/api/samehadaku/genre/{slug}?page={page}</div>
+    <table class="params-table"><thead><tr><th>Parameter</th><th>Type</th><th>Required</th><th>Description</th></tr></thead><tbody>
+      <tr><td class="param-name">slug</td><td>string</td><td class="param-req">Yes</td><td>Genre slug (contoh: action)</td></tr>
+      <tr><td class="param-name">page</td><td>number</td><td class="param-opt">No</td><td>Page number (default: 1)</td></tr>
+    </tbody></table>
+    <div class="try-section">
+      <label>API Key</label>
+      <input type="text" class="try-key" placeholder="Masukkan API key">
+      <label>Genre Slug</label>
+      <input type="text" class="try-param" data-param="slug" placeholder="action">
+      <label>Page</label>
+      <input type="number" class="try-param" data-param="page" placeholder="1" value="1">
+      <button class="try-btn" onclick="tryEndpointPathWithParams(this, '/api/samehadaku/genre/{slug}', 'slug', ['page'])">Try It</button>
+      <div class="response-box"><div class="response-header"><span class="status"></span><button class="copy-btn" onclick="copyResponse(this)">Copy</button></div><div class="response-body"></div></div>
+    </div>
+  </div>
+
+  <div class="section" id="smhd-az">
+    <h2><span class="badge badge-get">GET</span> Samehadaku - A-Z List</h2>
+    <p class="desc">Browse anime berdasarkan huruf alfabet.</p>
+    <div class="badge-base">/api/samehadaku/az-list?letter={letter}&page={page}</div>
+    <table class="params-table"><thead><tr><th>Parameter</th><th>Type</th><th>Required</th><th>Description</th></tr></thead><tbody>
+      <tr><td class="param-name">letter</td><td>string</td><td class="param-opt">No</td><td>Huruf filter (A-Z, kosong = semua)</td></tr>
+      <tr><td class="param-name">page</td><td>number</td><td class="param-opt">No</td><td>Page number</td></tr>
+    </tbody></table>
+    <div class="try-section">
+      <label>API Key</label>
+      <input type="text" class="try-key" placeholder="Masukkan API key">
+      <label>Letter</label>
+      <input type="text" class="try-param" data-param="letter" placeholder="A" maxlength="1">
+      <label>Page</label>
+      <input type="number" class="try-param" data-param="page" placeholder="1" value="1">
+      <button class="try-btn" onclick="tryEndpoint(this, '/api/samehadaku/az-list', ['letter','page'])">Try It</button>
+      <div class="response-box"><div class="response-header"><span class="status"></span><button class="copy-btn" onclick="copyResponse(this)">Copy</button></div><div class="response-body"></div></div>
+    </div>
+  </div>
+
+  <div class="section" id="smhd-schedule">
+    <h2><span class="badge badge-get">GET</span> Samehadaku - Schedule</h2>
+    <p class="desc">Ambil jadwal rilis anime per hari.</p>
+    <div class="badge-base">/api/samehadaku/schedule</div>
+    <div class="try-section">
+      <label>API Key</label>
+      <input type="text" class="try-key" placeholder="Masukkan API key">
+      <button class="try-btn" onclick="tryEndpoint(this, '/api/samehadaku/schedule', {})">Try It</button>
+      <div class="response-box"><div class="response-header"><span class="status"></span><button class="copy-btn" onclick="copyResponse(this)">Copy</button></div><div class="response-body"></div></div>
+    </div>
+  </div>
+
+  <div class="section" id="smhd-popular">
+    <h2><span class="badge badge-get">GET</span> Samehadaku - Popular</h2>
+    <p class="desc">Ambil daftar anime populer dari sidebar ranking.</p>
+    <div class="badge-base">/api/samehadaku/popular</div>
+    <div class="try-section">
+      <label>API Key</label>
+      <input type="text" class="try-key" placeholder="Masukkan API key">
+      <button class="try-btn" onclick="tryEndpoint(this, '/api/samehadaku/popular', {})">Try It</button>
+      <div class="response-box"><div class="response-header"><span class="status"></span><button class="copy-btn" onclick="copyResponse(this)">Copy</button></div><div class="response-body"></div></div>
+    </div>
+  </div>
+
+  <div class="section" id="smhd-animelist">
+    <h2><span class="badge badge-get">GET</span> Samehadaku - Anime List</h2>
+    <p class="desc">Browse semua anime dengan filter status, type, dan sorting.</p>
+    <div class="badge-base">/api/samehadaku/anime-list?page={page}&status={status}&type={type}&order={order}</div>
+    <table class="params-table"><thead><tr><th>Parameter</th><th>Type</th><th>Required</th><th>Description</th></tr></thead><tbody>
+      <tr><td class="param-name">page</td><td>number</td><td class="param-opt">No</td><td>Page number (default: 1)</td></tr>
+      <tr><td class="param-name">status</td><td>string</td><td class="param-opt">No</td><td>ongoing, completed, upcoming</td></tr>
+      <tr><td class="param-name">type</td><td>string</td><td class="param-opt">No</td><td>tv, movie, ova, ona, special</td></tr>
+      <tr><td class="param-name">order</td><td>string</td><td class="param-opt">No</td><td>update, title, titlereverse, popular, rating (default: update)</td></tr>
+    </tbody></table>
+    <div class="try-section">
+      <label>API Key</label>
+      <input type="text" class="try-key" placeholder="Masukkan API key">
+      <label>Page</label>
+      <input type="number" class="try-param" data-param="page" placeholder="1" value="1">
+      <label>Status</label>
+      <select class="try-param" data-param="status"><option value="">All</option><option value="ongoing">Ongoing</option><option value="completed">Completed</option><option value="upcoming">Upcoming</option></select>
+      <label>Type</label>
+      <select class="try-param" data-param="type"><option value="">All</option><option value="tv">TV</option><option value="movie">Movie</option><option value="ova">OVA</option><option value="ona">ONA</option><option value="special">Special</option></select>
+      <label>Order</label>
+      <select class="try-param" data-param="order"><option value="update">Latest Update</option><option value="popular">Popular</option><option value="rating">Rating</option><option value="title">A-Z</option><option value="titlereverse">Z-A</option></select>
+      <button class="try-btn" onclick="tryEndpoint(this, '/api/samehadaku/anime-list', ['page','status','type','order'])">Try It</button>
+      <div class="response-box"><div class="response-header"><span class="status"></span><button class="copy-btn" onclick="copyResponse(this)">Copy</button></div><div class="response-body"></div></div>
+    </div>
+  </div>
+
+  <!-- ANICHIN ENDPOINTS -->
+  <div class="section" id="ani-home">
+    <h2><span class="badge badge-get">GET</span> Anichin - Home</h2>
+    <p class="desc">Ambil data homepage Anichin.me: trending dan latest episodes.</p>
+    <div class="badge-base">/api/anichin/home</div>
+    <div class="try-section">
+      <label>API Key</label>
+      <input type="text" class="try-key" placeholder="Masukkan API key">
+      <button class="try-btn" onclick="tryEndpoint(this, '/api/anichin/home', {})">Try It</button>
+      <div class="response-box"><div class="response-header"><span class="status"></span><button class="copy-btn" onclick="copyResponse(this)">Copy</button></div><div class="response-body"></div></div>
+    </div>
+  </div>
+
+  <div class="section" id="ani-explore">
+    <h2><span class="badge badge-get">GET</span> Anichin - Explore</h2>
+    <p class="desc">Browse katalog anime dengan pagination, sorting, dan filter alfabet.</p>
+    <div class="badge-base">/api/anichin/explore?page={page}&sort={sort}&letter={letter}</div>
+    <table class="params-table"><thead><tr><th>Parameter</th><th>Type</th><th>Required</th><th>Description</th></tr></thead><tbody>
+      <tr><td class="param-name">page</td><td>number</td><td class="param-opt">No</td><td>Page number (default: 1, max ~74)</td></tr>
+      <tr><td class="param-name">sort</td><td>string</td><td class="param-opt">No</td><td>latest_update, popular, rating, title</td></tr>
+      <tr><td class="param-name">letter</td><td>string</td><td class="param-opt">No</td><td>Filter huruf (A-Z)</td></tr>
+    </tbody></table>
+    <div class="try-section">
+      <label>API Key</label>
+      <input type="text" class="try-key" placeholder="Masukkan API key">
+      <label>Page</label>
+      <input type="number" class="try-param" data-param="page" placeholder="1" value="1">
+      <label>Sort</label>
+      <select class="try-param" data-param="sort"><option value="">Default</option><option value="latest_update">Latest Update</option><option value="popular">Popular</option><option value="rating">Rating</option></select>
+      <label>Letter</label>
+      <input type="text" class="try-param" data-param="letter" placeholder="A" maxlength="1">
+      <button class="try-btn" onclick="tryEndpoint(this, '/api/anichin/explore', ['page','sort','letter'])">Try It</button>
+      <div class="response-box"><div class="response-header"><span class="status"></span><button class="copy-btn" onclick="copyResponse(this)">Copy</button></div><div class="response-body"></div></div>
+    </div>
+  </div>
+
+  <div class="section" id="ani-search">
+    <h2><span class="badge badge-get">GET</span> Anichin - Search</h2>
+    <p class="desc">Cari anime di Anichin.me.</p>
+    <div class="badge-base">/api/anichin/search?q={query}&page={page}</div>
+    <table class="params-table"><thead><tr><th>Parameter</th><th>Type</th><th>Required</th><th>Description</th></tr></thead><tbody>
+      <tr><td class="param-name">q</td><td>string</td><td class="param-req">Yes</td><td>Search keyword</td></tr>
+      <tr><td class="param-name">page</td><td>number</td><td class="param-opt">No</td><td>Page number</td></tr>
+    </tbody></table>
+    <div class="try-section">
+      <label>API Key</label>
+      <input type="text" class="try-key" placeholder="Masukkan API key">
+      <label>Query (q)</label>
+      <input type="text" class="try-param" data-param="q" placeholder="one piece">
+      <label>Page</label>
+      <input type="number" class="try-param" data-param="page" placeholder="1" value="1">
+      <button class="try-btn" onclick="tryEndpoint(this, '/api/anichin/search', ['q','page'])">Try It</button>
+      <div class="response-box"><div class="response-header"><span class="status"></span><button class="copy-btn" onclick="copyResponse(this)">Copy</button></div><div class="response-body"></div></div>
+    </div>
+  </div>
+
+  <div class="section" id="ani-anime">
+    <h2><span class="badge badge-get">GET</span> Anichin - Anime Detail</h2>
+    <p class="desc">Ambil detail anime lengkap dari Anichin.me termasuk episode list.</p>
+    <div class="badge-base">/api/anichin/anime/{slug}</div>
+    <table class="params-table"><thead><tr><th>Parameter</th><th>Type</th><th>Required</th><th>Description</th></tr></thead><tbody>
+      <tr><td class="param-name">slug</td><td>string</td><td class="param-req">Yes</td><td>Anime slug (contoh: one-piece)</td></tr>
+    </tbody></table>
+    <div class="try-section">
+      <label>API Key</label>
+      <input type="text" class="try-key" placeholder="Masukkan API key">
+      <label>Slug</label>
+      <input type="text" class="try-param" data-param="slug" placeholder="one-piece">
+      <button class="try-btn" onclick="tryEndpointPath(this, '/api/anichin/anime/{slug}', 'slug')">Try It</button>
+      <div class="response-box"><div class="response-header"><span class="status"></span><button class="copy-btn" onclick="copyResponse(this)">Copy</button></div><div class="response-body"></div></div>
+    </div>
+  </div>
+
+  <div class="section" id="ani-episode">
+    <h2><span class="badge badge-get">GET</span> Anichin - Episode</h2>
+    <p class="desc">Ambil detail episode: streaming servers, download links.</p>
+    <div class="badge-base">/api/anichin/anime/{slug}/episode/{number}</div>
+    <table class="params-table"><thead><tr><th>Parameter</th><th>Type</th><th>Required</th><th>Description</th></tr></thead><tbody>
+      <tr><td class="param-name">slug</td><td>string</td><td class="param-req">Yes</td><td>Anime slug</td></tr>
+      <tr><td class="param-name">number</td><td>number</td><td class="param-req">Yes</td><td>Episode number</td></tr>
+    </tbody></table>
+    <div class="try-section">
+      <label>API Key</label>
+      <input type="text" class="try-key" placeholder="Masukkan API key">
+      <label>Slug</label>
+      <input type="text" class="try-param" data-param="slug" placeholder="one-piece">
+      <label>Episode Number</label>
+      <input type="number" class="try-param" data-param="number" placeholder="1">
+      <button class="try-btn" onclick="tryEndpointDualPath(this, '/api/anichin/anime/{slug}/episode/{number}', 'slug', 'number')">Try It</button>
+      <div class="response-box"><div class="response-header"><span class="status"></span><button class="copy-btn" onclick="copyResponse(this)">Copy</button></div><div class="response-body"></div></div>
+    </div>
+  </div>
+
+  <div class="section" id="ani-movies">
+    <h2><span class="badge badge-get">GET</span> Anichin - Movies</h2>
+    <p class="desc">Browse daftar anime movie di Anichin.me.</p>
+    <div class="badge-base">/api/anichin/movies?page={page}</div>
+    <div class="try-section">
+      <label>API Key</label>
+      <input type="text" class="try-key" placeholder="Masukkan API key">
+      <label>Page</label>
+      <input type="number" class="try-param" data-param="page" placeholder="1" value="1">
+      <button class="try-btn" onclick="tryEndpoint(this, '/api/anichin/movies', ['page'])">Try It</button>
+      <div class="response-box"><div class="response-header"><span class="status"></span><button class="copy-btn" onclick="copyResponse(this)">Copy</button></div><div class="response-body"></div></div>
+    </div>
+  </div>
+
+  <!-- DONGHUA ENDPOINTS -->
+  <div class="section" id="dh-home">
+    <h2><span class="badge badge-get">GET</span> Donghua - Home</h2>
+    <p class="desc">Ambil data homepage Anichin.id: donghua terbaru dan populer.</p>
+    <div class="badge-base">/api/donghua/home</div>
+    <div class="try-section">
+      <label>API Key</label>
+      <input type="text" class="try-key" placeholder="Masukkan API key">
+      <button class="try-btn" onclick="tryEndpoint(this, '/api/donghua/home', {})">Try It</button>
+      <div class="response-box"><div class="response-header"><span class="status"></span><button class="copy-btn" onclick="copyResponse(this)">Copy</button></div><div class="response-body"></div></div>
+    </div>
+  </div>
+
+  <div class="section" id="dh-recent">
+    <h2><span class="badge badge-get">GET</span> Donghua - Recent</h2>
+    <p class="desc">Daftar donghua terbaru dengan pagination.</p>
+    <div class="badge-base">/api/donghua/recent?page={page}</div>
+    <div class="try-section">
+      <label>API Key</label>
+      <input type="text" class="try-key" placeholder="Masukkan API key">
+      <label>Page</label>
+      <input type="number" class="try-param" data-param="page" placeholder="1" value="1">
+      <button class="try-btn" onclick="tryEndpoint(this, '/api/donghua/recent', ['page'])">Try It</button>
+      <div class="response-box"><div class="response-header"><span class="status"></span><button class="copy-btn" onclick="copyResponse(this)">Copy</button></div><div class="response-body"></div></div>
+    </div>
+  </div>
+
+  <div class="section" id="dh-search">
+    <h2><span class="badge badge-get">GET</span> Donghua - Search</h2>
+    <p class="desc">Cari donghua berdasarkan keyword.</p>
+    <div class="badge-base">/api/donghua/search?q={query}&page={page}</div>
+    <table class="params-table"><thead><tr><th>Parameter</th><th>Type</th><th>Required</th><th>Description</th></tr></thead><tbody>
+      <tr><td class="param-name">q</td><td>string</td><td class="param-req">Yes</td><td>Search keyword</td></tr>
+      <tr><td class="param-name">page</td><td>number</td><td class="param-opt">No</td><td>Page number</td></tr>
+    </tbody></table>
+    <div class="try-section">
+      <label>API Key</label>
+      <input type="text" class="try-key" placeholder="Masukkan API key">
+      <label>Query (q)</label>
+      <input type="text" class="try-param" data-param="q" placeholder="battle through the heavens">
+      <label>Page</label>
+      <input type="number" class="try-param" data-param="page" placeholder="1" value="1">
+      <button class="try-btn" onclick="tryEndpoint(this, '/api/donghua/search', ['q','page'])">Try It</button>
+      <div class="response-box"><div class="response-header"><span class="status"></span><button class="copy-btn" onclick="copyResponse(this)">Copy</button></div><div class="response-body"></div></div>
+    </div>
+  </div>
+
+  <div class="section" id="dh-series">
+    <h2><span class="badge badge-get">GET</span> Donghua - Series Detail</h2>
+    <p class="desc">Ambil detail series donghua lengkap dengan episode list.</p>
+    <div class="badge-base">/api/donghua/series/{slug}</div>
+    <table class="params-table"><thead><tr><th>Parameter</th><th>Type</th><th>Required</th><th>Description</th></tr></thead><tbody>
+      <tr><td class="param-name">slug</td><td>string</td><td class="param-req">Yes</td><td>Series slug</td></tr>
+    </tbody></table>
+    <div class="try-section">
+      <label>API Key</label>
+      <input type="text" class="try-key" placeholder="Masukkan API key">
+      <label>Slug</label>
+      <input type="text" class="try-param" data-param="slug" placeholder="renegade-immortal">
+      <button class="try-btn" onclick="tryEndpointPath(this, '/api/donghua/series/{slug}', 'slug')">Try It</button>
+      <div class="response-box"><div class="response-header"><span class="status"></span><button class="copy-btn" onclick="copyResponse(this)">Copy</button></div><div class="response-body"></div></div>
+    </div>
+  </div>
+
+  <div class="section" id="dh-episode">
+    <h2><span class="badge badge-get">GET</span> Donghua - Episode</h2>
+    <p class="desc">Ambil detail episode donghua: servers dan download links.</p>
+    <div class="badge-base">/api/donghua/episode/{slug}</div>
+    <table class="params-table"><thead><tr><th>Parameter</th><th>Type</th><th>Required</th><th>Description</th></tr></thead><tbody>
+      <tr><td class="param-name">slug</td><td>string</td><td class="param-req">Yes</td><td>Episode slug (contoh: battle-through-the-heavens-season-5-episode-197-subtitle-indonesia)</td></tr>
+    </tbody></table>
+    <div class="try-section">
+      <label>API Key</label>
+      <input type="text" class="try-key" placeholder="Masukkan API key">
+      <label>Episode Slug</label>
+      <input type="text" class="try-param" data-param="slug" placeholder="battle-through-the-heavens-season-5-episode-197-subtitle-indonesia">
+      <button class="try-btn" onclick="tryEndpointPath(this, '/api/donghua/episode/{slug}', 'slug')">Try It</button>
+      <div class="response-box"><div class="response-header"><span class="status"></span><button class="copy-btn" onclick="copyResponse(this)">Copy</button></div><div class="response-body"></div></div>
+    </div>
+  </div>
+
+  <div class="section" id="dh-genres">
+    <h2><span class="badge badge-get">GET</span> Donghua - Genres</h2>
+    <p class="desc">Ambil daftar semua genre donghua.</p>
+    <div class="badge-base">/api/donghua/genres</div>
+    <div class="try-section">
+      <label>API Key</label>
+      <input type="text" class="try-key" placeholder="Masukkan API key">
+      <button class="try-btn" onclick="tryEndpoint(this, '/api/donghua/genres', {})">Try It</button>
+      <div class="response-box"><div class="response-header"><span class="status"></span><button class="copy-btn" onclick="copyResponse(this)">Copy</button></div><div class="response-body"></div></div>
+    </div>
+  </div>
+
+  <div class="section" id="dh-genre">
+    <h2><span class="badge badge-get">GET</span> Donghua - Genre List</h2>
+    <p class="desc">Ambil daftar donghua berdasarkan genre.</p>
+    <div class="badge-base">/api/donghua/genre/{slug}?page={page}</div>
+    <table class="params-table"><thead><tr><th>Parameter</th><th>Type</th><th>Required</th><th>Description</th></tr></thead><tbody>
+      <tr><td class="param-name">slug</td><td>string</td><td class="param-req">Yes</td><td>Genre slug</td></tr>
+      <tr><td class="param-name">page</td><td>number</td><td class="param-opt">No</td><td>Page number</td></tr>
+    </tbody></table>
+    <div class="try-section">
+      <label>API Key</label>
+      <input type="text" class="try-key" placeholder="Masukkan API key">
+      <label>Genre Slug</label>
+      <input type="text" class="try-param" data-param="slug" placeholder="action">
+      <label>Page</label>
+      <input type="number" class="try-param" data-param="page" placeholder="1" value="1">
+      <button class="try-btn" onclick="tryEndpointPathWithParams(this, '/api/donghua/genre/{slug}', 'slug', ['page'])">Try It</button>
+      <div class="response-box"><div class="response-header"><span class="status"></span><button class="copy-btn" onclick="copyResponse(this)">Copy</button></div><div class="response-body"></div></div>
+    </div>
+  </div>
+
+  <div class="section" id="dh-serieslist">
+    <h2><span class="badge badge-get">GET</span> Donghua - Series List</h2>
+    <p class="desc">Browse semua donghua dengan filter dan sorting.</p>
+    <div class="badge-base">/api/donghua/series-list?page={page}&status={status}&type={type}&order={order}</div>
+    <table class="params-table"><thead><tr><th>Parameter</th><th>Type</th><th>Required</th><th>Description</th></tr></thead><tbody>
+      <tr><td class="param-name">page</td><td>number</td><td class="param-opt">No</td><td>Page number</td></tr>
+      <tr><td class="param-name">status</td><td>string</td><td class="param-opt">No</td><td>ongoing, completed</td></tr>
+      <tr><td class="param-name">type</td><td>string</td><td class="param-opt">No</td><td>donghua, movie, tv, ova</td></tr>
+      <tr><td class="param-name">order</td><td>string</td><td class="param-opt">No</td><td>update, popular, rating, title, titlereverse</td></tr>
+    </tbody></table>
+    <div class="try-section">
+      <label>API Key</label>
+      <input type="text" class="try-key" placeholder="Masukkan API key">
+      <label>Page</label>
+      <input type="number" class="try-param" data-param="page" placeholder="1" value="1">
+      <label>Status</label>
+      <select class="try-param" data-param="status"><option value="">All</option><option value="ongoing">Ongoing</option><option value="completed">Completed</option></select>
+      <label>Type</label>
+      <select class="try-param" data-param="type"><option value="">All</option><option value="donghua">Donghua</option><option value="movie">Movie</option><option value="tv">TV Series</option></select>
+      <label>Order</label>
+      <select class="try-param" data-param="order"><option value="update">Latest Update</option><option value="popular">Popular</option><option value="rating">Rating</option><option value="title">A-Z</option></select>
+      <button class="try-btn" onclick="tryEndpoint(this, '/api/donghua/series-list', ['page','status','type','order'])">Try It</button>
+      <div class="response-box"><div class="response-header"><span class="status"></span><button class="copy-btn" onclick="copyResponse(this)">Copy</button></div><div class="response-body"></div></div>
+    </div>
+  </div>
+
+  <div class="section" id="dh-schedule">
+    <h2><span class="badge badge-get">GET</span> Donghua - Schedule</h2>
+    <p class="desc">Ambil jadwal rilis donghua per hari.</p>
+    <div class="badge-base">/api/donghua/schedule</div>
+    <div class="try-section">
+      <label>API Key</label>
+      <input type="text" class="try-key" placeholder="Masukkan API key">
+      <button class="try-btn" onclick="tryEndpoint(this, '/api/donghua/schedule', {})">Try It</button>
+      <div class="response-box"><div class="response-header"><span class="status"></span><button class="copy-btn" onclick="copyResponse(this)">Copy</button></div><div class="response-body"></div></div>
+    </div>
+  </div>
+
+  <div class="section" id="dh-az">
+    <h2><span class="badge badge-get">GET</span> Donghua - A-Z List</h2>
+    <p class="desc">Browse donghua berdasarkan huruf alfabet.</p>
+    <div class="badge-base">/api/donghua/az-list?letter={letter}</div>
+    <div class="try-section">
+      <label>API Key</label>
+      <input type="text" class="try-key" placeholder="Masukkan API key">
+      <label>Letter</label>
+      <input type="text" class="try-param" data-param="letter" placeholder="B" maxlength="1">
+      <button class="try-btn" onclick="tryEndpoint(this, '/api/donghua/az-list', ['letter'])">Try It</button>
+      <div class="response-box"><div class="response-header"><span class="status"></span><button class="copy-btn" onclick="copyResponse(this)">Copy</button></div><div class="response-body"></div></div>
+    </div>
+  </div>
+
+  <div class="section" id="dh-popular">
+    <h2><span class="badge badge-get">GET</span> Donghua - Popular</h2>
+    <p class="desc">Ambil daftar donghua populer.</p>
+    <div class="badge-base">/api/donghua/popular</div>
+    <div class="try-section">
+      <label>API Key</label>
+      <input type="text" class="try-key" placeholder="Masukkan API key">
+      <button class="try-btn" onclick="tryEndpoint(this, '/api/donghua/popular', {})">Try It</button>
+      <div class="response-box"><div class="response-header"><span class="status"></span><button class="copy-btn" onclick="copyResponse(this)">Copy</button></div><div class="response-body"></div></div>
+    </div>
+  </div>
+
+  <div style="text-align:center;padding:32px 0;color:var(--text2);font-size:13px;border-top:3px solid var(--accent);margin-top:24px;font-family:var(--mono)">
+    VelyDocs API &mdash; Created by <strong style="color:var(--accent)">Gxyenn</strong>
+  </div>
+</div>
+
+<script>
+const BASE_URL = window.location.origin;
+document.getElementById('baseUrl').textContent = BASE_URL;
+
+// Theme toggle
+function toggleTheme() {
+  const html = document.documentElement;
+  const btn = document.getElementById('themeToggle');
+  if (html.getAttribute('data-theme') === 'light') {
+    html.setAttribute('data-theme', 'dark');
+    btn.textContent = 'Light Mode';
+  } else {
+    html.setAttribute('data-theme', 'light');
+    btn.textContent = 'Dark Mode';
+  }
+  localStorage.setItem('theme', html.getAttribute('data-theme'));
+}
+const saved = localStorage.getItem('theme');
+if (saved) {
+  document.documentElement.setAttribute('data-theme', saved);
+  document.getElementById('themeToggle').textContent = saved === 'light' ? 'Dark Mode' : 'Light Mode';
+}
+
+// Sidebar nav
+document.querySelectorAll('.nav-item').forEach(item => {
+  item.addEventListener('click', () => {
+    document.querySelectorAll('.nav-item').forEach(n => n.classList.remove('active'));
+    item.classList.add('active');
+    const target = document.getElementById(item.dataset.target);
+    if (target) target.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    if (window.innerWidth <= 768) toggleSidebar();
+  });
+});
+
+// Mobile sidebar
+function toggleSidebar() {
+  document.getElementById('sidebar').classList.toggle('open');
+  document.getElementById('overlay').classList.toggle('open');
+}
+
+// Try It functions
+async function tryEndpoint(btn, path, params) {
+  const section = btn.closest('.try-section');
+  const key = section.querySelector('.try-key').value.trim();
+  const box = section.querySelector('.response-box');
+  const statusEl = box.querySelector('.status');
+  const bodyEl = box.querySelector('.response-body');
+
+  btn.disabled = true;
+  btn.textContent = 'Loading...';
+  box.classList.add('show');
+  statusEl.textContent = 'Fetching...';
+  statusEl.className = 'status';
+  bodyEl.textContent = '';
+
+  let url = BASE_URL + path;
+  const qp = new URLSearchParams();
+  if (key) qp.set('apikey', key);
+
+  if (Array.isArray(params)) {
+    section.querySelectorAll('.try-param').forEach(input => {
+      const p = input.dataset.param;
+      const v = input.value.trim();
+      if (v && params.includes(p)) qp.set(p, v);
+    });
+  }
+
+  const qs = qp.toString();
+  if (qs) url += '?' + qs;
+
+  try {
+    const resp = await fetch(url);
+    const data = await resp.json();
+    statusEl.textContent = resp.status + ' ' + resp.statusText;
+    statusEl.className = 'status ' + (resp.ok ? 'status-ok' : 'status-err');
+    bodyEl.textContent = JSON.stringify(data, null, 2);
+  } catch (e) {
+    statusEl.textContent = 'Error';
+    statusEl.className = 'status status-err';
+    bodyEl.textContent = e.message;
+  }
+  btn.disabled = false;
+  btn.textContent = 'Try It';
+}
+
+async function tryEndpointPath(btn, pathTemplate, paramName) {
+  const section = btn.closest('.try-section');
+  const key = section.querySelector('.try-key').value.trim();
+  const val = section.querySelector(`[data-param="${paramName}"]`).value.trim();
+  if (!val) { alert(`${paramName} is required`); return; }
+  const path = pathTemplate.replace(`{${paramName}}`, encodeURIComponent(val));
+  const box = section.querySelector('.response-box');
+  const statusEl = box.querySelector('.status');
+  const bodyEl = box.querySelector('.response-body');
+
+  btn.disabled = true;
+  btn.textContent = 'Loading...';
+  box.classList.add('show');
+  statusEl.textContent = 'Fetching...';
+  bodyEl.textContent = '';
+
+  let url = BASE_URL + path;
+  if (key) url += '?apikey=' + encodeURIComponent(key);
+
+  try {
+    const resp = await fetch(url);
+    const data = await resp.json();
+    statusEl.textContent = resp.status + ' ' + resp.statusText;
+    statusEl.className = 'status ' + (resp.ok ? 'status-ok' : 'status-err');
+    bodyEl.textContent = JSON.stringify(data, null, 2);
+  } catch (e) {
+    statusEl.textContent = 'Error';
+    statusEl.className = 'status status-err';
+    bodyEl.textContent = e.message;
+  }
+  btn.disabled = false;
+  btn.textContent = 'Try It';
+}
+
+async function tryEndpointDualPath(btn, pathTemplate, param1, param2) {
+  const section = btn.closest('.try-section');
+  const key = section.querySelector('.try-key').value.trim();
+  const v1 = section.querySelector(`[data-param="${param1}"]`).value.trim();
+  const v2 = section.querySelector(`[data-param="${param2}"]`).value.trim();
+  if (!v1 || !v2) { alert(`${param1} and ${param2} are required`); return; }
+  const path = pathTemplate.replace(`{${param1}}`, encodeURIComponent(v1)).replace(`{${param2}}`, encodeURIComponent(v2));
+  const box = section.querySelector('.response-box');
+  const statusEl = box.querySelector('.status');
+  const bodyEl = box.querySelector('.response-body');
+
+  btn.disabled = true;
+  btn.textContent = 'Loading...';
+  box.classList.add('show');
+  statusEl.textContent = 'Fetching...';
+  bodyEl.textContent = '';
+
+  let url = BASE_URL + path;
+  if (key) url += '?apikey=' + encodeURIComponent(key);
+
+  try {
+    const resp = await fetch(url);
+    const data = await resp.json();
+    statusEl.textContent = resp.status + ' ' + resp.statusText;
+    statusEl.className = 'status ' + (resp.ok ? 'status-ok' : 'status-err');
+    bodyEl.textContent = JSON.stringify(data, null, 2);
+  } catch (e) {
+    statusEl.textContent = 'Error';
+    statusEl.className = 'status status-err';
+    bodyEl.textContent = e.message;
+  }
+  btn.disabled = false;
+  btn.textContent = 'Try It';
+}
+
+async function tryEndpointPathWithParams(btn, pathTemplate, pathParam, queryParams) {
+  const section = btn.closest('.try-section');
+  const key = section.querySelector('.try-key').value.trim();
+  const slugVal = section.querySelector(`[data-param="${pathParam}"]`).value.trim();
+  if (!slugVal) { alert(`${pathParam} is required`); return; }
+  const path = pathTemplate.replace(`{${pathParam}}`, encodeURIComponent(slugVal));
+  const box = section.querySelector('.response-box');
+  const statusEl = box.querySelector('.status');
+  const bodyEl = box.querySelector('.response-body');
+
+  btn.disabled = true;
+  btn.textContent = 'Loading...';
+  box.classList.add('show');
+  statusEl.textContent = 'Fetching...';
+  bodyEl.textContent = '';
+
+  const qp = new URLSearchParams();
+  if (key) qp.set('apikey', key);
+  queryParams.forEach(p => {
+    const input = section.querySelector(`[data-param="${p}"]`);
+    if (input && input.value.trim()) qp.set(p, input.value.trim());
+  });
+
+  let url = BASE_URL + path;
+  const qs = qp.toString();
+  if (qs) url += '?' + qs;
+
+  try {
+    const resp = await fetch(url);
+    const data = await resp.json();
+    statusEl.textContent = resp.status + ' ' + resp.statusText;
+    statusEl.className = 'status ' + (resp.ok ? 'status-ok' : 'status-err');
+    bodyEl.textContent = JSON.stringify(data, null, 2);
+  } catch (e) {
+    statusEl.textContent = 'Error';
+    statusEl.className = 'status status-err';
+    bodyEl.textContent = e.message;
+  }
+  btn.disabled = false;
+  btn.textContent = 'Try It';
+}
+
+function copyResponse(btn) {
+  const body = btn.closest('.response-box').querySelector('.response-body');
+  navigator.clipboard.writeText(body.textContent).then(() => {
+    btn.textContent = 'Copied!';
+    setTimeout(() => btn.textContent = 'Copy', 1500);
+  });
+}
+
+// Scroll spy
+const sections = document.querySelectorAll('.section[id]');
+const navItems = document.querySelectorAll('.nav-item[data-target]');
+const observer = new IntersectionObserver(entries => {
+  entries.forEach(entry => {
+    if (entry.isIntersecting) {
+      navItems.forEach(n => n.classList.remove('active'));
+      const target = document.querySelector(`.nav-item[data-target="${entry.target.id}"]`);
+      if (target) target.classList.add('active');
+    }
+  });
+}, { rootMargin: '-20% 0px -70% 0px' });
+sections.forEach(s => observer.observe(s));
+</script>
+</body>
+</html>
