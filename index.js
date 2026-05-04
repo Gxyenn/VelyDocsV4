@@ -34,7 +34,9 @@ function checkApiKey(req, res, next) {
       status: false,
       message: 'API Key diperlukan. Tambahkan ?key=YOUR_KEY di URL atau X-API-Key di header.',
       info: 'Hubungi t.me/@Gxyenn969 untuk membeli API Key premium.',
-      freeKeys: ['keys-free'],
+      freeKeys: ([
+      'keys-free'
+      ]),
     });
   }
 
