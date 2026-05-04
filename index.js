@@ -9,7 +9,9 @@ const PORT = process.env.PORT || 3000;
 
 // ==================== API KEY SYSTEM ====================
 // Free keys (limited requests)
-const FREE_KEYS = new Set("keys-free");
+const FREE_KEYS = new Set([
+"keys-free",
+]);
 
 // Premium keys (unlimited / higher limit)
 const PREMIUM_KEYS = new Set([
@@ -32,7 +34,7 @@ function checkApiKey(req, res, next) {
       status: false,
       message: 'API Key diperlukan. Tambahkan ?key=YOUR_KEY di URL atau X-API-Key di header.',
       info: 'Hubungi t.me/@Gxyenn969 untuk membeli API Key premium.',
-      freeKeys: ['vely-docs-free-2026', 'gxyenn-public-key', 'demo-access-key'],
+      freeKeys: ['keys-free'],
     });
   }
 
