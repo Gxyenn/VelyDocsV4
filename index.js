@@ -7,6 +7,18 @@ const rateLimit = require('express-rate-limit');
 const app = express();
 const PORT = process.env.PORT || 3000;
 
+// ==================== ANTI-BLOCK PROXY SUPPORT ====================
+const { setProxies, getSessionStats, clearAllCookies, cache } = require('./lib/scraper');
+
+// Load proxies from environment variable (comma-separated)
+if (process.env.PROXIES) {
+  const proxyList = process.env.PROXIES.split(',').map(p => p.trim()).filter(Boolean);
+  if (proxyList.length) {
+    setProxies(proxyList);
+    console.log(`🛡️ Loaded ${proxyList.length} proxy(ies) for anti-block protection`);
+  }
+}
+
 // ==================== API KEY SYSTEM ====================
 // Free keys (limited requests)
 const FREE_KEYS = new Set([
@@ -49,10 +61,10 @@ function checkApiKey(req, res, next) {
 
   // Cek free key
   if (FREE_KEYS.has(apiKey)) {
-    // Rate limit untuk free key: 30 request per menit
+    // Rate limit untuk free key: 50 request per menit
     const now = Date.now();
     const windowMs = 60 * 1000; // 1 menit
-    const maxRequests = 30;
+    const maxRequests = 50;
 
     if (!keyUsage.has(apiKey)) {
       keyUsage.set(apiKey, { count: 1, resetTime: now + windowMs });
@@ -101,7 +113,7 @@ app.use(cors({
   allowedHeaders: ['Content-Type', 'Authorization', 'X-API-Key'],
 }));
 
-// Rate limiting global
+// Rate limiting global (skip untuk premium/admin keys)
 const limiter = rateLimit({
   windowMs: 15 * 60 * 1000,
   max: 100,
@@ -110,6 +122,11 @@ const limiter = rateLimit({
   message: {
     status: false,
     message: 'Terlalu banyak request, coba lagi nanti.',
+  },
+  skip: (req) => {
+    // Admin/premium keys bypass global rate limit sepenuhnya
+    const apiKey = req.query.key || req.headers['x-api-key'];
+    return PREMIUM_KEYS.has(apiKey);
   },
 });
 app.use(limiter);
@@ -139,7 +156,7 @@ app.get('/', (req, res) => {
     contact: 't.me/@Gxyenn969',
     pricing: {
       free: {
-        description: 'Gratis dengan limit 30 req/menit',
+        description: 'Gratis dengan limit 50 req/menit',
         keys: "keys-free",
       },
       premium: {
@@ -160,26 +177,27 @@ app.get('/', (req, res) => {
           { method: 'GET', path: '/genres?key=YOUR_KEY', desc: 'List all genres' },
           { method: 'GET', path: '/genre/:slug?page=1&key=YOUR_KEY', desc: 'Anime by genre' },
           { method: 'GET', path: '/az-list?letter=A&page=1&key=YOUR_KEY', desc: 'A-Z anime list' },
-          { method: 'GET', path: '/schedule?key=YOUR_KEY', desc: 'Release schedule' },
           { method: 'GET', path: '/popular?period=weekly&key=YOUR_KEY', desc: 'Popular anime' },
           { method: 'GET', path: '/anime-list?page=1&status=&type=&order=&key=YOUR_KEY', desc: 'Full anime list with filters' },
+          { method: 'GET', path: '/schedule?key=YOUR_KEY', desc: 'Samehadaku release schedule' },
         ]
       },
       anichin: {
         base: '/api/anichin',
         endpoints: [
           { method: 'GET', path: '/home?key=YOUR_KEY', desc: 'Homepage - Trending & Latest' },
-          { method: 'GET', path: '/explore?page=1&sort=&letter=&key=YOUR_KEY', desc: 'Explore anime' },
-          { method: 'GET', path: '/anime/:slug?key=YOUR_KEY', desc: 'Anime detail' },
-          { method: 'GET', path: '/anime/:slug/episode/:number?key=YOUR_KEY', desc: 'Episode with video' },
-          { method: 'GET', path: '/search?q=&page=1&key=YOUR_KEY', desc: 'Search anime' },
+          { method: 'GET', path: '/explore?page=1&sort=&letter=&status=&type=&key=YOUR_KEY', desc: 'Explore anime with filters' },
+          { method: 'GET', path: '/anime/:slug?key=YOUR_KEY', desc: 'Anime detail with episode list' },
+          { method: 'GET', path: '/anime/:slug/episode/:number?key=YOUR_KEY', desc: 'Episode with video, servers & downloads' },
+          { method: 'GET', path: '/search?q=naruto&page=1&key=YOUR_KEY', desc: 'Search anime' },
           { method: 'GET', path: '/movies?page=1&key=YOUR_KEY', desc: 'Anime movies' },
           { method: 'GET', path: '/ongoing?page=1&key=YOUR_KEY', desc: 'Anime ongoing' },
           { method: 'GET', path: '/completed?page=1&key=YOUR_KEY', desc: 'Anime completed' },
-          { method: 'GET', path: '/genres?key=YOUR_KEY', desc: 'List genres' },
+          { method: 'GET', path: '/genres?key=YOUR_KEY', desc: 'List all genres' },
           { method: 'GET', path: '/genre/:slug?page=1&key=YOUR_KEY', desc: 'Anime by genre' },
-          { method: 'GET', path: '/seasons?key=YOUR_KEY', desc: 'List seasons' },
+          { method: 'GET', path: '/seasons?key=YOUR_KEY', desc: 'List all seasons' },
           { method: 'GET', path: '/season/:slug?page=1&key=YOUR_KEY', desc: 'Anime by season' },
+          { method: 'GET', path: '/schedule?key=YOUR_KEY', desc: 'Anichin release schedule' },
         ]
       },
       schedule: {
@@ -211,6 +229,26 @@ app.get('/health', (req, res) => {
     timestamp: new Date().toISOString(),
     memory: process.memoryUsage(),
   });
+});
+
+// Session stats endpoint (premium only)
+app.get('/stats', (req, res) => {
+  const apiKey = req.query.key || req.headers['x-api-key'];
+  if (!PREMIUM_KEYS.has(apiKey)) {
+    return res.status(403).json({ status: false, message: 'Hanya premium key yang bisa akses stats.' });
+  }
+  res.json({ status: true, stats: getSessionStats() });
+});
+
+// Cache management endpoint (premium only)
+app.post('/cache/clear', (req, res) => {
+  const apiKey = req.query.key || req.headers['x-api-key'];
+  if (!PREMIUM_KEYS.has(apiKey)) {
+    return res.status(403).json({ status: false, message: 'Hanya premium key yang bisa clear cache.' });
+  }
+  cache.flushAll();
+  clearAllCookies();
+  res.json({ status: true, message: 'Cache dan cookies berhasil dibersihkan.' });
 });
 
 // 404 handler
