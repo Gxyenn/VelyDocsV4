@@ -458,7 +458,9 @@ router.get('/anime/:slug/episode/:number', async (req, res) => {
   }
 });
 
-// ==================== SERVERS ====================
+// ==================== SERVERS (Full Scraping) ====================
+// Endpoint ini mengambil SEMUA server streaming, mirror, download URLs,
+// quality levels, dan iframe URLs dari episode secara lengkap & maksimal.
 router.get('/anime/:slug/episode/:number/servers', async (req, res) => {
   try {
     const { slug, number } = req.params;
@@ -476,86 +478,184 @@ router.get('/anime/:slug/episode/:number/servers', async (req, res) => {
     }
 
     const episode = inertia.props.episode;
+    const $ = cheerio.load(html);
 
-    // Collect all servers from various possible fields
-    const allServers = [];
+    // ============ 1. STREAMING SERVERS ============
+    const streamServers = [];
+    const downloadLinks = [];
+    const byQuality = {};
 
-    // From episode.servers array
+    // Source 1: episode.servers array
     if (Array.isArray(episode.servers)) {
       episode.servers.forEach(s => {
-        allServers.push({
-          name: s.name || s.label || s.server || '',
-          url: s.url || s.src || s.embed || '',
-          quality: s.quality || s.resolution || '',
-          type: (s.type || 'stream').toLowerCase() === 'download' ? 'download' : 'stream',
-        });
+        const name = s.name || s.label || s.server || '';
+        const serverUrl = s.url || s.src || s.embed || '';
+        const quality = s.quality || s.resolution || '';
+        const type = (s.type || 'stream').toLowerCase() === 'download' ? 'download' : 'stream';
+
+        const entry = { name, url: serverUrl, quality, type };
+
+        if (type === 'download') {
+          downloadLinks.push(entry);
+        } else {
+          streamServers.push(entry);
+        }
+
+        const key = quality || 'Unknown';
+        if (!byQuality[key]) byQuality[key] = [];
+        byQuality[key].push(entry);
       });
     }
 
-    // From mirror_streams (array or object)
+    // Source 2: mirror_streams (array or quality-keyed object)
     let mirrorStreams = episode.mirror_streams || [];
     if (mirrorStreams && !Array.isArray(mirrorStreams) && typeof mirrorStreams === 'object') {
-      mirrorStreams = Object.entries(mirrorStreams).map(([quality, url]) => ({
+      mirrorStreams = Object.entries(mirrorStreams).map(([quality, val]) => ({
         label: quality,
-        url: typeof url === 'string' ? url : (url && url.url) || '',
+        url: typeof val === 'string' ? val : (val && (val.url || val.src || val.embed)) || '',
         quality,
+        server: (val && val.server) || (val && val.name) || quality,
       }));
     }
     if (Array.isArray(mirrorStreams)) {
       mirrorStreams.forEach(m => {
-        allServers.push({
-          name: m.label || m.name || m.server || '',
-          url: m.url || '',
-          quality: m.quality || m.label || '',
+        const name = m.label || m.name || m.server || '';
+        const mUrl = m.url || m.src || m.embed || '';
+        const quality = m.quality || m.label || m.resolution || '';
+        if (!mUrl) return;
+        // Cek duplikat
+        if (streamServers.some(s => s.url === mUrl)) return;
+
+        const entry = { name, url: mUrl, quality, type: 'stream' };
+        streamServers.push(entry);
+
+        const key = quality || 'Unknown';
+        if (!byQuality[key]) byQuality[key] = [];
+        byQuality[key].push(entry);
+      });
+    }
+
+    // Source 3: download_urls (array or object)
+    let dlUrls = episode.download_urls || episode.downloads || [];
+    if (dlUrls && !Array.isArray(dlUrls) && typeof dlUrls === 'object') {
+      dlUrls = Object.entries(dlUrls).map(([quality, val]) => ({
+        label: quality,
+        url: typeof val === 'string' ? val : (val && (val.url || val.link)) || '',
+        quality,
+        name: (val && val.name) || (val && val.host) || quality,
+        size: (val && val.size) || '',
+      }));
+    }
+    if (Array.isArray(dlUrls)) {
+      dlUrls.forEach(d => {
+        const name = d.label || d.name || d.server || d.host || '';
+        const dUrl = d.url || d.link || '';
+        const quality = d.quality || d.label || d.resolution || '';
+        const size = d.size || '';
+        if (!dUrl) return;
+        if (downloadLinks.some(dl => dl.url === dUrl)) return;
+
+        const entry = { name, url: dUrl, quality, type: 'download', size };
+        downloadLinks.push(entry);
+
+        const key = quality || 'Unknown';
+        if (!byQuality[key]) byQuality[key] = [];
+        byQuality[key].push(entry);
+      });
+    }
+
+    // Source 4: episode.sources / episode.videos (beberapa tema Inertia)
+    const extraSources = episode.sources || episode.videos || episode.embeds || [];
+    if (Array.isArray(extraSources)) {
+      extraSources.forEach(s => {
+        const name = s.name || s.label || s.server || '';
+        const sUrl = s.url || s.src || s.embed || '';
+        const quality = s.quality || s.resolution || '';
+        if (!sUrl) return;
+        if (streamServers.some(sv => sv.url === sUrl)) return;
+
+        const entry = { name, url: sUrl, quality, type: 'stream' };
+        streamServers.push(entry);
+
+        const key = quality || 'Unknown';
+        if (!byQuality[key]) byQuality[key] = [];
+        byQuality[key].push(entry);
+      });
+    }
+
+    // Source 5: Iframe / embed URL fallbacks
+    const defaultIframe = episode.iframe || episode.embed_url || episode.video_url || '';
+    if (defaultIframe) {
+      const alreadyListed = streamServers.some(s => s.url === defaultIframe) ||
+                            downloadLinks.some(d => d.url === defaultIframe);
+      if (!alreadyListed) {
+        const entry = { name: 'Default Player', url: defaultIframe, quality: '', type: 'stream' };
+        streamServers.push(entry);
+        if (!byQuality['Unknown']) byQuality['Unknown'] = [];
+        byQuality['Unknown'].push(entry);
+      }
+    }
+
+    // Source 6: Extract iframes from raw HTML (fallback)
+    const allListedUrls = new Set([
+      ...streamServers.map(s => s.url),
+      ...downloadLinks.map(d => d.url),
+    ]);
+    $('iframe[src]').each((i, el) => {
+      const src = $(el).attr('src') || '';
+      if (src && !allListedUrls.has(src) && !src.includes('googleads') && !src.includes('facebook') && !src.includes('google.com/recaptcha')) {
+        const iframeSrc = src.startsWith('http') ? src : absUrl(src);
+        const entry = { name: `Iframe Player ${i + 1}`, url: iframeSrc, quality: '', type: 'stream' };
+        streamServers.push(entry);
+        if (!byQuality['Unknown']) byQuality['Unknown'] = [];
+        byQuality['Unknown'].push(entry);
+      }
+    });
+
+    // Source 7: Scan HTML for video/source elements
+    $('video source[src]').each((i, el) => {
+      const src = $(el).attr('src') || '';
+      const quality = $(el).attr('label') || $(el).attr('data-quality') || $(el).attr('size') || '';
+      if (src && !allListedUrls.has(src)) {
+        const entry = {
+          name: `Direct Video ${quality || i + 1}`,
+          url: src.startsWith('http') ? src : absUrl(src),
+          quality: quality ? quality + (quality.match(/p$/i) ? '' : 'p') : '',
           type: 'stream',
-        });
-      });
-    }
-
-    // From download_urls
-    (episode.download_urls || []).forEach(d => {
-      allServers.push({
-        name: d.label || d.name || d.server || '',
-        url: d.url || '',
-        quality: d.quality || d.label || '',
-        type: 'download',
-      });
+        };
+        streamServers.push(entry);
+        const key = entry.quality || 'Unknown';
+        if (!byQuality[key]) byQuality[key] = [];
+        byQuality[key].push(entry);
+      }
     });
 
-    // Iframe / embed fallbacks
-    const iframeUrl = episode.iframe || episode.embed_url || episode.video_url || '';
-    if (iframeUrl && !allServers.some(s => s.url === iframeUrl)) {
-      allServers.push({
-        name: 'Default',
-        url: iframeUrl,
-        quality: '',
-        type: 'stream',
-      });
-    }
+    // ============ 2. BUILD RESOLUTIONS SUMMARY ============
+    const resolutions = buildResolutions(
+      streamServers.map(s => ({ label: s.name, url: s.url, quality: s.quality })),
+      downloadLinks.map(d => ({ label: d.name, url: d.url, quality: d.quality }))
+    );
 
-    // Fallback: extract iframe from raw HTML
-    if (allServers.length === 0) {
-      const $ = cheerio.load(html);
-      $('iframe[src]').each((i, el) => {
-        const src = $(el).attr('src');
-        if (src) {
-          allServers.push({
-            name: `Iframe ${i + 1}`,
-            url: src.startsWith('http') ? src : absUrl(src),
-            quality: '',
-            type: 'stream',
-          });
-        }
-      });
-    }
+    // ============ 3. SORT & GROUP BY QUALITY ============
+    const sortedQualities = Object.keys(byQuality).sort((a, b) => {
+      if (a === 'Unknown' || !a) return 1;
+      if (b === 'Unknown' || !b) return -1;
+      const numA = parseInt(a.replace('p', '')) || 0;
+      const numB = parseInt(b.replace('p', '')) || 0;
+      return numA - numB;
+    });
 
-    // Group by quality
     const grouped = {};
-    allServers.forEach(s => {
-      const key = s.quality || 'unknown';
-      if (!grouped[key]) grouped[key] = [];
-      grouped[key].push(s);
-    });
+    sortedQualities.forEach(q => { grouped[q] = byQuality[q]; });
+
+    // ============ 4. QUALITY SUMMARY ============
+    const qualitySummary = sortedQualities
+      .filter(q => q !== 'Unknown' && q !== '')
+      .map(q => ({
+        quality: q,
+        totalStreaming: (byQuality[q] || []).filter(s => s.type === 'stream').length,
+        totalDownload: (byQuality[q] || []).filter(s => s.type === 'download').length,
+      }));
 
     res.json({
       status: true,
@@ -563,9 +663,13 @@ router.get('/anime/:slug/episode/:number/servers', async (req, res) => {
       data: {
         slug,
         episode: number,
-        total_servers: allServers.length,
-        servers: allServers,
-        grouped_by_quality: grouped,
+        totalServers: streamServers.length,
+        totalDownloads: downloadLinks.length,
+        qualitySummary,
+        resolutions,
+        servers: streamServers,
+        downloads: downloadLinks,
+        byQuality: grouped,
       },
     });
   } catch (e) {
@@ -573,7 +677,9 @@ router.get('/anime/:slug/episode/:number/servers', async (req, res) => {
   }
 });
 
-// ==================== BATCH DOWNLOAD ====================
+// ==================== BATCH DOWNLOAD (Full Scraping) ====================
+// Endpoint ini mengambil SEMUA batch download links, termasuk dari halaman
+// anime detail DAN halaman batch khusus, semua kualitas dan semua host.
 router.get('/batch/:slug', async (req, res) => {
   try {
     const { slug } = req.params;
@@ -593,46 +699,157 @@ router.get('/batch/:slug', async (req, res) => {
     const anime = inertia.props.anime;
     const props = inertia.props;
 
-    // Look for batch downloads in multiple possible locations
-    let batchDownloads = anime.batch_downloads || props.batch || anime.downloads || null;
+    // ============ COLLECT ALL BATCH DOWNLOADS ============
+    let allDownloads = [];
 
-    // If not found in Inertia, try fetching the batch page as fallback
-    if (!batchDownloads) {
+    // Source 1: anime.batch_downloads
+    const src1 = anime.batch_downloads || null;
+    if (src1) allDownloads.push({ source: 'anime.batch_downloads', data: src1 });
+
+    // Source 2: props.batch
+    const src2 = props.batch || null;
+    if (src2) allDownloads.push({ source: 'props.batch', data: src2 });
+
+    // Source 3: anime.downloads
+    const src3 = anime.downloads || null;
+    if (src3) allDownloads.push({ source: 'anime.downloads', data: src3 });
+
+    // Source 4: props.downloads
+    const src4 = props.downloads || null;
+    if (src4) allDownloads.push({ source: 'props.downloads', data: src4 });
+
+    // Source 5: anime.batch
+    const src5 = anime.batch || null;
+    if (src5) allDownloads.push({ source: 'anime.batch', data: src5 });
+
+    // Source 6: Try fetching dedicated batch page
+    const batchPages = [
+      `${BASE}/anime/${slug}/batch`,
+      `${BASE}/batch/${slug}`,
+      `${BASE}/anime/${slug}/download`,
+    ];
+    for (const batchUrl of batchPages) {
       try {
-        const batchUrl = `${BASE}/anime/${slug}/batch`;
         const batchHtml = await fetchPage(batchUrl, url);
         const batchInertia = extractInertia(batchHtml);
         if (batchInertia && batchInertia.props) {
-          batchDownloads =
-            batchInertia.props.batch_downloads ||
-            batchInertia.props.batch ||
-            batchInertia.props.downloads ||
-            (batchInertia.props.anime && batchInertia.props.anime.batch_downloads) ||
-            null;
+          const bp = batchInertia.props;
+          const candidates = [
+            bp.batch_downloads,
+            bp.batch,
+            bp.downloads,
+            bp.anime?.batch_downloads,
+            bp.anime?.downloads,
+            bp.anime?.batch,
+            bp.links,
+            bp.download_links,
+          ].filter(Boolean);
+
+          candidates.forEach(c => {
+            allDownloads.push({ source: `batch_page:${batchUrl}`, data: c });
+          });
+
+          if (candidates.length) break; // Stop if we found data
+        }
+
+        // Also try scraping HTML directly (non-Inertia fallback)
+        const $ = cheerio.load(batchHtml);
+        const htmlLinks = [];
+        $('a[href]').each((i, el) => {
+          const href = $(el).attr('href') || '';
+          const text = $(el).text().trim();
+          if (href && text && !href.includes('javascript:') && !href.startsWith('#') &&
+              (href.includes('download') || href.includes('dl.') || href.includes('drive') ||
+               href.includes('mega') || href.includes('mediafire') || href.includes('zippyshare') ||
+               href.includes('mp4') || href.includes('mkv'))) {
+            htmlLinks.push({ name: text, url: href, quality: '', size: '' });
+          }
+        });
+        if (htmlLinks.length) {
+          allDownloads.push({ source: `html_scrape:${batchUrl}`, data: htmlLinks });
         }
       } catch (_) {
-        // Batch page may not exist — that is fine
+        // Page doesn't exist, continue
       }
     }
 
-    // Normalize batch downloads to array
-    let downloads = [];
-    if (Array.isArray(batchDownloads)) {
-      downloads = batchDownloads.map(d => ({
-        name: d.name || d.label || d.server || '',
-        url: d.url || d.link || '',
-        quality: d.quality || d.resolution || '',
-        size: d.size || '',
-      }));
-    } else if (batchDownloads && typeof batchDownloads === 'object') {
-      // Could be quality-keyed: { "720p": "url", "1080p": { url, size } }
-      downloads = Object.entries(batchDownloads).map(([key, val]) => ({
-        name: key,
-        url: typeof val === 'string' ? val : (val && (val.url || val.link)) || '',
-        quality: key,
-        size: (val && val.size) || '',
-      }));
+    // ============ NORMALIZE ALL DOWNLOADS ============
+    const downloads = [];
+    const seenUrls = new Set();
+
+    function normalizeAndAdd(data) {
+      if (Array.isArray(data)) {
+        data.forEach(d => {
+          const name = d.name || d.label || d.server || d.host || '';
+          const dUrl = d.url || d.link || d.href || '';
+          const quality = d.quality || d.resolution || '';
+          const size = d.size || d.filesize || '';
+          if (dUrl && !seenUrls.has(dUrl)) {
+            seenUrls.add(dUrl);
+            downloads.push({ name, url: dUrl, quality, size });
+          }
+        });
+      } else if (data && typeof data === 'object') {
+        // Quality-keyed: { "720p": "url", "1080p": { url, size } }
+        Object.entries(data).forEach(([key, val]) => {
+          if (typeof val === 'string') {
+            if (!seenUrls.has(val)) {
+              seenUrls.add(val);
+              downloads.push({ name: key, url: val, quality: key, size: '' });
+            }
+          } else if (val && typeof val === 'object') {
+            // Could be { url, size, name, ... } or array
+            if (Array.isArray(val)) {
+              val.forEach(v => {
+                const vUrl = v.url || v.link || '';
+                if (vUrl && !seenUrls.has(vUrl)) {
+                  seenUrls.add(vUrl);
+                  downloads.push({
+                    name: v.name || v.label || v.host || key,
+                    url: vUrl,
+                    quality: v.quality || key,
+                    size: v.size || '',
+                  });
+                }
+              });
+            } else {
+              const vUrl = val.url || val.link || val.href || '';
+              if (vUrl && !seenUrls.has(vUrl)) {
+                seenUrls.add(vUrl);
+                downloads.push({
+                  name: val.name || val.label || val.host || key,
+                  url: vUrl,
+                  quality: val.quality || key,
+                  size: val.size || '',
+                });
+              }
+            }
+          }
+        });
+      }
     }
+
+    allDownloads.forEach(item => normalizeAndAdd(item.data));
+
+    // ============ GROUP BY QUALITY ============
+    const byQuality = {};
+    downloads.forEach(dl => {
+      const key = dl.quality || 'Unknown';
+      if (!byQuality[key]) byQuality[key] = [];
+      byQuality[key].push(dl);
+    });
+
+    // Sort quality keys
+    const sortedQualities = Object.keys(byQuality).sort((a, b) => {
+      if (a === 'Unknown' || !a) return 1;
+      if (b === 'Unknown' || !b) return -1;
+      const numA = parseInt(a.replace('p', '')) || 0;
+      const numB = parseInt(b.replace('p', '')) || 0;
+      return numA - numB;
+    });
+
+    const grouped = {};
+    sortedQualities.forEach(q => { grouped[q] = byQuality[q]; });
 
     res.json({
       status: true,
@@ -643,7 +860,10 @@ router.get('/batch/:slug', async (req, res) => {
         poster: anime.poster || '',
         total_episodes: anime.episodes_count || 0,
         batch_available: downloads.length > 0,
+        totalQualities: sortedQualities.filter(q => q !== 'Unknown' && q !== '').length,
+        totalDownloads: downloads.length,
         downloads,
+        byQuality: grouped,
       },
     });
   } catch (e) {

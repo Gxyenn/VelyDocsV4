@@ -446,7 +446,9 @@ router.get('/episode/*', async (req, res) => {
   }
 });
 
-// ==================== BATCH DOWNLOAD ====================
+// ==================== BATCH DOWNLOAD (Full Scraping) ====================
+// Endpoint ini mengambil SEMUA batch download links dari halaman batch,
+// termasuk semua kualitas (360p, 480p, 720p, 1080p) dan semua host.
 router.get('/batch/:slug', async (req, res) => {
   try {
     const { slug } = req.params;
@@ -467,103 +469,128 @@ router.get('/batch/:slug', async (req, res) => {
       }
     });
 
-    // Extract batch download links — try multiple selectors
+    // ============ EXTRACT ALL DOWNLOAD LINKS ============
     const downloads = [];
+
+    // Method 1: .soraddl layout (tema utama Samehadaku)
     const batchSelectors = [
       '.mctnx .soraddl',
       '.batchlink .soraddl',
       '.download-batch .soraddl',
       '#batch-download .soraddl',
+      '.dlbod .soraddl',
+      '.bixbox .soraddl',
     ];
     let batchElements = $([]);
     for (const sel of batchSelectors) {
       batchElements = $(sel);
       if (batchElements.length) break;
     }
+    // Fallback: semua .soraddl
+    if (!batchElements.length) {
+      batchElements = $('.soraddl');
+    }
     batchElements.each((i, el) => {
-      const quality = $(el).find('.sorattl h3').text().trim();
+      const quality = $(el).find('.sorattl h3, .sorattl span, .sorattl').first().text().trim();
       const links = [];
       $(el).find('.soraurl a').each((j, a) => {
-        links.push({ host: $(a).text().trim(), url: $(a).attr('href') || '' });
+        const host = $(a).text().trim();
+        const href = $(a).attr('href') || '';
+        if (host && href) {
+          links.push({ host, url: href });
+        }
       });
       if (quality || links.length) {
         downloads.push({ quality, links });
       }
     });
 
-    // Fallback: try broader selectors
+    // Method 2: Flat list layout
     if (downloads.length === 0) {
-      $('.batchlink a, .download-batch a, #batch-download a').each((i, el) => {
+      $('.batchlink a, .download-batch a, #batch-download a, .batch-dl a').each((i, el) => {
         const href = $(el).attr('href') || '';
         const text = $(el).text().trim();
-        if (href && text) {
-          downloads.push({ quality: text, links: [{ host: text, url: href }] });
+        if (href && text && !href.includes('javascript:') && !href.startsWith('#')) {
+          const resMatch = text.match(/(\d{3,4})[pP]/);
+          const quality = resMatch ? resMatch[1] + 'p' : '';
+          downloads.push({ quality, links: [{ host: text, url: href }] });
         }
       });
     }
 
-    res.json({
-      status: true,
-      creator: 'Gxyenn',
-      data: {
-        title,
-        slug,
-        animeSlug,
-        animeInfo,
-        totalDownloads: downloads.length,
-        downloads,
-      },
-    });
-  } catch (e) {
-    res.status(500).json({ status: false, message: e.message, creator: 'Gxyenn' });
-  }
-});
-
-// ==================== SERVERS (Episode Mirrors) ====================
-router.get('/servers/:episodeSlug(*)', async (req, res) => {
-  try {
-    const episodeSlug = req.params.episodeSlug || '';
-    if (!episodeSlug) {
-      return res.status(400).json({ status: false, message: 'Episode slug required', creator: 'Gxyenn' });
+    // Method 3: Table-based batch download
+    if (downloads.length === 0) {
+      $('table tr').each((i, el) => {
+        if (i === 0 && $(el).find('th').length) return;
+        const tds = $(el).find('td');
+        if (tds.length >= 2) {
+          const quality = $(tds[0]).text().trim();
+          const links = [];
+          $(el).find('a').each((j, a) => {
+            const host = $(a).text().trim();
+            const href = $(a).attr('href') || '';
+            if (host && href && !href.includes('javascript:')) {
+              links.push({ host, url: href });
+            }
+          });
+          if (links.length) downloads.push({ quality, links });
+        }
+      });
     }
 
-    const url = `${BASE}/${episodeSlug}/`;
-    const html = await fetchPage(url, BASE);
-    const $ = cheerio.load(html);
-
-    const title = $('h1.entry-title').text().trim();
-
-    // Extract all mirror options with decoded iframe URLs
-    const allServers = [];
-    const byQuality = {};
-
-    $('select.mirror option').each((i, el) => {
-      const val = $(el).attr('value');
-      const name = $(el).text().trim();
-      if (val && name && name !== '- Select Server -') {
-        const resMatch = name.match(/(\d{3,4})[pP]/);
-        const resolution = resMatch ? resMatch[1] + 'p' : 'Unknown';
-        const decodedUrl = decodeMirrorValue(val);
-
-        const entry = {
-          name,
-          resolution,
-          iframeUrl: decodedUrl,
-          rawValue: val,
-          type: name.toLowerCase().includes('download') ? 'download' : 'stream',
-        };
-
-        allServers.push(entry);
-
-        if (!byQuality[resolution]) {
-          byQuality[resolution] = [];
+    // Method 4: .downloadzz layout
+    if (downloads.length === 0) {
+      $('.downloadzz .soraddl, .downloadzz ul li').each((i, el) => {
+        if ($(el).is('li')) {
+          const a = $(el).find('a');
+          const href = a.attr('href') || '';
+          const text = $(el).text().trim();
+          if (href) {
+            const resMatch = text.match(/(\d{3,4})[pP]/);
+            const quality = resMatch ? resMatch[1] + 'p' : text;
+            downloads.push({ quality, links: [{ host: a.text().trim(), url: href }] });
+          }
+        } else {
+          const quality = $(el).find('.sorattl h3, .sorattl span, .sorattl').first().text().trim();
+          const links = [];
+          $(el).find('.soraurl a').each((j, a) => {
+            const host = $(a).text().trim();
+            const href = $(a).attr('href') || '';
+            if (host && href) links.push({ host, url: href });
+          });
+          if (quality || links.length) downloads.push({ quality, links });
         }
-        byQuality[resolution].push(entry);
-      }
+      });
+    }
+
+    // Method 5: Generic download link scan
+    if (downloads.length === 0) {
+      $('a[href*="download"], a[href*="dl."], a[class*="download"], a[class*="dl-btn"]').each((i, el) => {
+        const href = $(el).attr('href') || '';
+        const text = $(el).text().trim();
+        if (href && text && !href.includes('javascript:') && !href.startsWith('#')) {
+          if (downloads.some(d => d.links.some(l => l.url === href))) return;
+          const resMatch = text.match(/(\d{3,4})[pP]/);
+          const quality = resMatch ? resMatch[1] + 'p' : '';
+          downloads.push({ quality, links: [{ host: text, url: href }] });
+        }
+      });
+    }
+
+    // ============ GROUP BY QUALITY ============
+    const byQuality = {};
+    downloads.forEach(dl => {
+      const key = dl.quality || 'Unknown';
+      if (!byQuality[key]) byQuality[key] = [];
+      dl.links.forEach(link => {
+        byQuality[key].push(link);
+      });
     });
 
-    // Sort quality keys numerically
+    // Sort quality keys
     const sortedQualities = Object.keys(byQuality).sort((a, b) => {
+      if (a === 'Unknown' || !a) return 1;
+      if (b === 'Unknown' || !b) return -1;
       const numA = parseInt(a.replace('p', '')) || 0;
       const numB = parseInt(b.replace('p', '')) || 0;
       return numA - numB;
@@ -577,9 +604,312 @@ router.get('/servers/:episodeSlug(*)', async (req, res) => {
       creator: 'Gxyenn',
       data: {
         title,
+        slug,
+        animeSlug,
+        animeInfo,
+        totalQualities: sortedQualities.filter(q => q !== 'Unknown' && q !== '').length,
+        totalDownloads: downloads.reduce((sum, d) => sum + d.links.length, 0),
+        downloads,
+        byQuality: grouped,
+      },
+    });
+  } catch (e) {
+    res.status(500).json({ status: false, message: e.message, creator: 'Gxyenn' });
+  }
+});
+
+// ==================== SERVERS (Episode Mirrors + Downloads) ====================
+// Endpoint ini mengambil SEMUA server streaming, mirror, quality, iframe,
+// DAN semua download links dari halaman episode secara lengkap.
+router.get('/servers/:episodeSlug(*)', async (req, res) => {
+  try {
+    const episodeSlug = req.params.episodeSlug || '';
+    if (!episodeSlug) {
+      return res.status(400).json({ status: false, message: 'Episode slug required', creator: 'Gxyenn' });
+    }
+
+    const url = `${BASE}/${episodeSlug}/`;
+    const html = await fetchPage(url, BASE);
+    const $ = cheerio.load(html);
+
+    const title = $('h1.entry-title').text().trim();
+
+    // ============ 1. STREAMING SERVERS (dari mirror/select dropdown) ============
+    const streamServers = [];
+    const byQuality = {};
+
+    // Method 1: select.mirror option (tema utama Samehadaku)
+    $('select.mirror option').each((i, el) => {
+      const val = $(el).attr('value');
+      const name = $(el).text().trim();
+      if (val && name && name !== '- Select Server -' && name !== 'Select Server') {
+        const resMatch = name.match(/(\d{3,4})[pP]/);
+        const resolution = resMatch ? resMatch[1] + 'p' : 'Unknown';
+        const decodedUrl = decodeMirrorValue(val);
+
+        const entry = {
+          name,
+          resolution,
+          iframeUrl: decodedUrl,
+          rawValue: val,
+          type: name.toLowerCase().includes('download') ? 'download' : 'stream',
+        };
+
+        streamServers.push(entry);
+
+        if (!byQuality[resolution]) byQuality[resolution] = [];
+        byQuality[resolution].push(entry);
+      }
+    });
+
+    // Method 2: select[name="server"] option (tema alternatif)
+    $('select[name="server"] option, .server-select option').each((i, el) => {
+      const val = $(el).attr('value');
+      const name = $(el).text().trim();
+      if (val && name && name !== '- Select Server -' && name !== 'Select Server') {
+        // Cek duplikat
+        if (streamServers.some(s => s.rawValue === val)) return;
+        const resMatch = name.match(/(\d{3,4})[pP]/);
+        const resolution = resMatch ? resMatch[1] + 'p' : 'Unknown';
+        const decodedUrl = decodeMirrorValue(val);
+
+        const entry = {
+          name,
+          resolution,
+          iframeUrl: decodedUrl,
+          rawValue: val,
+          type: 'stream',
+        };
+
+        streamServers.push(entry);
+        if (!byQuality[resolution]) byQuality[resolution] = [];
+        byQuality[resolution].push(entry);
+      }
+    });
+
+    // Method 3: Tab-based server list (.server-list, .mirror-list)
+    $('.mirror-list ul li, .server-list ul li, .mirrorlist ul li').each((i, el) => {
+      const a = $(el).find('a');
+      const name = a.text().trim() || $(el).text().trim();
+      const dataValue = a.attr('data-value') || a.attr('data-src') || a.attr('data-url') || a.attr('href') || '';
+      if (name && dataValue) {
+        if (streamServers.some(s => s.rawValue === dataValue)) return;
+        const resMatch = name.match(/(\d{3,4})[pP]/);
+        const resolution = resMatch ? resMatch[1] + 'p' : 'Unknown';
+        const decodedUrl = decodeMirrorValue(dataValue);
+
+        const entry = {
+          name,
+          resolution,
+          iframeUrl: decodedUrl || (dataValue.startsWith('http') ? dataValue : null),
+          rawValue: dataValue,
+          type: 'stream',
+        };
+
+        streamServers.push(entry);
+        if (!byQuality[resolution]) byQuality[resolution] = [];
+        byQuality[resolution].push(entry);
+      }
+    });
+
+    // Method 4: Data attributes pada elemen player
+    $('[data-resolution], [data-quality]').each((i, el) => {
+      const quality = $(el).attr('data-resolution') || $(el).attr('data-quality') || '';
+      const src = $(el).attr('data-src') || $(el).attr('data-url') || $(el).attr('href') || '';
+      const name = $(el).text().trim() || quality;
+      if (quality && src) {
+        if (streamServers.some(s => s.iframeUrl === src)) return;
+        const resolution = quality.match(/(\d{3,4})[pP]/) ? quality : 'Unknown';
+
+        const entry = { name, resolution, iframeUrl: src, rawValue: src, type: 'stream' };
+        streamServers.push(entry);
+        if (!byQuality[resolution]) byQuality[resolution] = [];
+        byQuality[resolution].push(entry);
+      }
+    });
+
+    // Method 5: Resolution buttons/links
+    $('.resolution a, .quality a, [class*="resol"] a, [class*="qualit"] a').each((i, el) => {
+      const name = $(el).text().trim();
+      const src = $(el).attr('href') || $(el).attr('data-src') || '';
+      if (name && src && /\d{3,4}[pP]/.test(name)) {
+        if (streamServers.some(s => s.iframeUrl === src)) return;
+        const resMatch = name.match(/(\d{3,4})[pP]/);
+        const resolution = resMatch ? resMatch[1] + 'p' : 'Unknown';
+
+        const entry = { name, resolution, iframeUrl: src, rawValue: src, type: 'stream' };
+        streamServers.push(entry);
+        if (!byQuality[resolution]) byQuality[resolution] = [];
+        byQuality[resolution].push(entry);
+      }
+    });
+
+    // Method 6: Semua iframe yang ada di halaman
+    const iframeUrls = new Set(streamServers.map(s => s.iframeUrl).filter(Boolean));
+    $('iframe[src]').each((i, el) => {
+      const src = $(el).attr('src') || '';
+      if (src && !iframeUrls.has(src) && !src.includes('googleads') && !src.includes('facebook')) {
+        const entry = {
+          name: `Iframe Player ${i + 1}`,
+          resolution: 'Unknown',
+          iframeUrl: src,
+          rawValue: src,
+          type: 'stream',
+        };
+        streamServers.push(entry);
+        if (!byQuality['Unknown']) byQuality['Unknown'] = [];
+        byQuality['Unknown'].push(entry);
+      }
+    });
+
+    // ============ 2. DOWNLOAD LINKS (semua kualitas, semua host) ============
+    const downloads = [];
+
+    // Method 1: .soraddl layout (tema utama Samehadaku)
+    const dlSelectors = [
+      '.mctnx .soraddl',
+      '.downloadzz .soraddl',
+      '.download-eps .soraddl',
+      '#download-links .soraddl',
+      '.dlbod .soraddl',
+      '.bixbox .soraddl',
+    ];
+    let dlElements = $([]);
+    for (const sel of dlSelectors) {
+      dlElements = $(sel);
+      if (dlElements.length) break;
+    }
+    // Jika tidak ketemu dengan single selector, coba gabungan
+    if (!dlElements.length) {
+      dlElements = $('.soraddl');
+    }
+    dlElements.each((i, el) => {
+      const quality = $(el).find('.sorattl h3, .sorattl span, .sorattl').first().text().trim();
+      const links = [];
+      $(el).find('.soraurl a').each((j, a) => {
+        const host = $(a).text().trim();
+        const href = $(a).attr('href') || '';
+        if (host && href) {
+          links.push({ host, url: href });
+        }
+      });
+      if (quality || links.length) {
+        downloads.push({ quality, links });
+      }
+    });
+
+    // Method 2: Flat list layout (.downloadzz ul li)
+    if (downloads.length === 0) {
+      $('.downloadzz ul li, .download-list ul li, #download-box ul li').each((i, el) => {
+        const a = $(el).find('a');
+        const text = $(el).text().trim();
+        const href = a.attr('href') || '';
+        if (href) {
+          const resMatch = text.match(/(\d{3,4})[pP]/);
+          const quality = resMatch ? resMatch[1] + 'p' : text;
+          downloads.push({ quality, links: [{ host: a.text().trim(), url: href }] });
+        }
+      });
+    }
+
+    // Method 3: Table-based download links
+    if (downloads.length === 0) {
+      $('table.download-table tr, table.dlTable tr, .download-area table tr').each((i, el) => {
+        if (i === 0 && $(el).find('th').length) return; // skip header
+        const tds = $(el).find('td');
+        if (tds.length >= 2) {
+          const quality = $(tds[0]).text().trim();
+          const links = [];
+          $(el).find('a').each((j, a) => {
+            const host = $(a).text().trim();
+            const href = $(a).attr('href') || '';
+            if (host && href) links.push({ host, url: href });
+          });
+          if (links.length) downloads.push({ quality, links });
+        }
+      });
+    }
+
+    // Method 4: Divisi-based download (.download a, #download a)
+    if (downloads.length === 0) {
+      $('.download a[href], #download a[href], .dl-link a[href], .downloadx a[href]').each((i, el) => {
+        const href = $(el).attr('href') || '';
+        const text = $(el).text().trim();
+        if (href && text && !href.includes('javascript:') && !href.startsWith('#')) {
+          const resMatch = text.match(/(\d{3,4})[pP]/);
+          const quality = resMatch ? resMatch[1] + 'p' : '';
+          downloads.push({ quality, links: [{ host: text, url: href }] });
+        }
+      });
+    }
+
+    // Method 5: Scan semua link dengan kata kunci download di href/class
+    if (downloads.length === 0) {
+      $('a[href*="download"], a[href*="dl."], a[class*="download"], a[class*="dl-btn"]').each((i, el) => {
+        const href = $(el).attr('href') || '';
+        const text = $(el).text().trim();
+        if (href && text && !href.includes('javascript:') && !href.startsWith('#')) {
+          if (downloads.some(d => d.links.some(l => l.url === href))) return;
+          const resMatch = text.match(/(\d{3,4})[pP]/);
+          const quality = resMatch ? resMatch[1] + 'p' : '';
+          downloads.push({ quality, links: [{ host: text, url: href }] });
+        }
+      });
+    }
+
+    // ============ 3. MERGE download quality ke byQuality ============
+    downloads.forEach(dl => {
+      if (dl.quality) {
+        const resMatch = dl.quality.match(/(\d{3,4})[pP]/);
+        if (resMatch) {
+          const key = resMatch[1] + 'p';
+          if (!byQuality[key]) byQuality[key] = [];
+          dl.links.forEach(link => {
+            byQuality[key].push({
+              name: `${link.host} (Download)`,
+              resolution: key,
+              iframeUrl: null,
+              downloadUrl: link.url,
+              rawValue: link.url,
+              type: 'download',
+            });
+          });
+        }
+      }
+    });
+
+    // ============ 4. Sort quality keys numerically ============
+    const sortedQualities = Object.keys(byQuality).sort((a, b) => {
+      if (a === 'Unknown') return 1;
+      if (b === 'Unknown') return -1;
+      const numA = parseInt(a.replace('p', '')) || 0;
+      const numB = parseInt(b.replace('p', '')) || 0;
+      return numA - numB;
+    });
+
+    const grouped = {};
+    sortedQualities.forEach(q => { grouped[q] = byQuality[q]; });
+
+    // ============ 5. Build quality summary ============
+    const qualitySummary = sortedQualities
+      .filter(q => q !== 'Unknown')
+      .map(q => ({
+        quality: q,
+        totalStreaming: (byQuality[q] || []).filter(s => s.type === 'stream').length,
+        totalDownload: (byQuality[q] || []).filter(s => s.type === 'download').length,
+      }));
+
+    res.json({
+      status: true,
+      creator: 'Gxyenn',
+      data: {
+        title,
         slug: episodeSlug,
-        totalServers: allServers.length,
-        servers: allServers,
+        totalServers: streamServers.length,
+        totalDownloads: downloads.reduce((sum, d) => sum + d.links.length, 0),
+        qualitySummary,
+        servers: streamServers,
+        downloads,
         byQuality: grouped,
       },
     });
