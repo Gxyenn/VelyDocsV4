@@ -1,0 +1,27 @@
+{
+  "name": "vely-docs-v4",
+  "version": "2.1.0",
+  "description": "Anime API Documentation & Scraper - Samehadaku & Anichin",
+  "main": "index.js",
+  "scripts": {
+    "start": "node index.js",
+    "dev": "nodemon index.js",
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "keywords": ["anime", "api", "samehadaku", "anichin", "scraper"],
+  "author": "Gxyenn",
+  "license": "ISC",
+  "dependencies": {
+    "axios": "^1.7.2",
+    "cheerio": "^1.0.0-rc.12",
+    "express": "^4.19.2",
+    "node-cache": "^5.1.2",
+    "cors": "^2.8.5",
+    "helmet": "^7.1.0",
+    "express-rate-limit": "^7.3.1",
+    "compression": "^1.7.4"
+  },
+  "devDependencies": {
+    "nodemon": "^3.1.4"
+  }
+}
