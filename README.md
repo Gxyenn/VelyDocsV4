@@ -69,11 +69,10 @@ X-API-Key: vely-docs-free-2026
 - **Anime Detail:** List slug episode
 - **Episode/Watch:** Slug anime parent + slug episode
 
-### 3. Video Player & Resolusi
-- **Iframe URL:** Otomatis diekstrak
-- **Semua Resolusi:** 360p, 480p, 720p, 1080p (tergantung availability)
-- **Server List:** Dengan info resolusi per server
-- **Download Links:** Terpisah per kualitas
+### 3. Separated Endpoints
+- **Episode:** Info dasar + iframe + navigasi (clean, ringan)
+- **Servers:** Semua server/mirror grouped by quality (dedicated endpoint)
+- **Batch:** Batch download links per anime (dedicated endpoint)
 
 ### 4. Jadwal Rilis (Schedule)
 - **Samehadaku:** `/api/schedule/samehadaku`
@@ -126,7 +125,9 @@ Server akan berjalan di `http://localhost:3000`
 | GET | `/recent?page=1&key=...` | Update terbaru | `page`, `key` |
 | GET | `/search?q=naruto&page=1&key=...` | Cari anime | `q`, `page`, `key` |
 | GET | `/anime/:slug?key=...` | Detail anime + episode list | `slug`, `key` |
-| GET | `/episode/:slug?key=...` | Detail episode + video | `slug`, `key` |
+| GET | `/episode/:slug?key=...` | Detail episode + video iframe | `slug`, `key` |
+| GET | `/servers/:episodeSlug?key=...` | Streaming servers/mirrors by quality | `slug`, `key` |
+| GET | `/batch/:slug?key=...` | Batch download links | `slug`, `key` |
 | GET | `/genres?key=...` | Daftar genre | `key` |
 | GET | `/genre/:slug?page=1&key=...` | Anime per genre | `slug`, `page`, `key` |
 | GET | `/az-list?letter=A&page=1&key=...` | Daftar A-Z | `letter`, `page`, `key` |
@@ -141,7 +142,9 @@ Server akan berjalan di `http://localhost:3000`
 | GET | `/home?key=...` | Homepage - Trending & Latest | `key` |
 | GET | `/explore?page=1&sort=&letter=&status=&type=&key=...` | Jelajahi anime | `page`, `sort`, `letter`, `status`, `type`, `key` |
 | GET | `/anime/:slug?key=...` | Detail anime | `slug`, `key` |
-| GET | `/anime/:slug/episode/:number?key=...` | Episode + video | `slug`, `number`, `key` |
+| GET | `/anime/:slug/episode/:number?key=...` | Detail episode + video URL | `slug`, `number`, `key` |
+| GET | `/anime/:slug/episode/:number/servers?key=...` | Streaming servers/mirrors by quality | `slug`, `number`, `key` |
+| GET | `/batch/:slug?key=...` | Batch download links | `slug`, `key` |
 | GET | `/search?q=&page=1&key=...` | Cari anime | `q`, `page`, `key` |
 | GET | `/movies?page=1&key=...` | Film anime | `page`, `key` |
 | GET | `/ongoing?page=1&key=...` | Anime ongoing | `page`, `key` |
@@ -195,7 +198,7 @@ Server akan berjalan di `http://localhost:3000`
 }
 ```
 
-### Episode Detail (Dengan Video)
+### Episode Detail (Clean Response)
 ```json
 {
   "status": true,
@@ -209,20 +212,14 @@ Server akan berjalan di `http://localhost:3000`
       "next": "one-piece-episode-1096-subtitle-indonesia"
     },
     "iframe": "https://stream.example.com/embed/abc123",
-    "resolutions": [
-      { "quality": "480p", "iframe": "https://...", "server": "Server 1" },
-      { "quality": "720p", "iframe": "https://...", "server": "Server 2" },
-      { "quality": "1080p", "iframe": "https://...", "server": "Server 3" }
-    ],
-    "downloads": [
-      {
-        "quality": "720p",
-        "links": [
-          { "host": "Google Drive", "url": "https://..." },
-          { "host": "Mega", "url": "https://..." }
-        ]
-      }
-    ]
+    "animeInfo": {
+      "status": "Ongoing",
+      "type": "TV"
+    },
+    "endpoints": {
+      "servers": "/api/samehadaku/servers/one-piece-episode-1095-subtitle-indonesia",
+      "batch": "/api/samehadaku/batch/one-piece"
+    }
   }
 }
 ```

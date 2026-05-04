@@ -356,6 +356,8 @@ router.get('/anime/:slug', async (req, res) => {
 });
 
 // ==================== EPISODE / WATCH ====================
+// NOTE: Untuk daftar server/mirror gunakan /anime/:slug/episode/:number/servers
+//       Untuk batch download gunakan /batch/:slug
 router.get('/anime/:slug/episode/:number', async (req, res) => {
   try {
     const { slug, number } = req.params;
@@ -393,28 +395,6 @@ router.get('/anime/:slug/episode/:number', async (req, res) => {
         videoUrl = iframeSrc.startsWith('http') ? iframeSrc : absUrl(iframeSrc);
       }
     }
-
-    // --- Servers: check episode.servers array ---
-    const servers = (Array.isArray(episode.servers) ? episode.servers : []).map(s => ({
-      name: s.name || s.label || s.server || '',
-      url: s.url || s.src || s.embed || '',
-      quality: s.quality || s.resolution || '',
-      type: (s.type || 'stream').toLowerCase() === 'download' ? 'download' : 'stream',
-    }));
-
-    // --- Mirror streams: handle both array and quality-keyed object ---
-    let mirrorStreams = episode.mirror_streams || [];
-    if (mirrorStreams && !Array.isArray(mirrorStreams) && typeof mirrorStreams === 'object') {
-      // Convert { "720p": "url", "1080p": "url" } to array format
-      mirrorStreams = Object.entries(mirrorStreams).map(([quality, url]) => ({
-        label: quality,
-        url: typeof url === 'string' ? url : (url && url.url) || '',
-        quality,
-      }));
-    }
-
-    const downloadUrls = episode.download_urls || [];
-    const resolutions = buildResolutions(mirrorStreams, downloadUrls);
 
     // Navigation: prev / next episode from allEpisodes list
     let prev = null;
@@ -463,14 +443,14 @@ router.get('/anime/:slug/episode/:number', async (req, res) => {
         slug,
         episode: episode.number || number,
         video_url: videoUrl,
-        servers,
-        mirror_streams: mirrorStreams,
-        download_urls: downloadUrls,
-        resolutions,
         duration: episode.duration || '',
         release_date: episode.release_date || '',
         navigation: { prev, next },
         anime_info: animeInfo,
+        endpoints: {
+          servers: `/api/anichin/anime/${slug}/episode/${number}/servers`,
+          batch: `/api/anichin/batch/${slug}`,
+        },
       },
     });
   } catch (e) {

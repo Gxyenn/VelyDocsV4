@@ -358,6 +358,8 @@ router.get('/anime/:slug', async (req, res) => {
 
 // ==================== EPISODE / WATCH ====================
 // Gunakan wildcard untuk menangkap slug dengan subpath
+// NOTE: Untuk daftar server/mirror gunakan /servers/:episodeSlug
+//       Untuk batch download gunakan /batch/:slug
 router.get('/episode/*', async (req, res) => {
   try {
     // Ambil full slug dari wildcard params
@@ -374,115 +376,36 @@ router.get('/episode/*', async (req, res) => {
     const prevEp = $('.naveps .nvs.l a').attr('href') || '';
     const nextEp = $('.naveps .nvs.r a').attr('href') || '';
 
-    // Extract video data (iframe & resolutions)
+    // Extract default iframe URL
     const videoData = extractVideoData($);
+    let iframeUrl = videoData.iframeUrl || null;
 
-    // Enhanced server extraction with resolution parsing and base64 decoding
-    const servers = [];
-    let firstDecodedIframe = null;
-    $('select.mirror option').each((i, el) => {
-      const val = $(el).attr('value');
-      const name = $(el).text().trim();
-      if (val && name && name !== '- Select Server -') {
-        const resMatch = name.match(/(\d{3,4})[pP]/);
-        const resolution = resMatch ? resMatch[1] + 'p' : 'Unknown';
-        const decodedUrl = decodeMirrorValue(val);
-
-        if (decodedUrl && !firstDecodedIframe) {
-          firstDecodedIframe = decodedUrl;
+    // Try decoding the first mirror option if no iframe found
+    if (!iframeUrl) {
+      $('select.mirror option').each((i, el) => {
+        if (iframeUrl) return;
+        const val = $(el).attr('value');
+        const name = $(el).text().trim();
+        if (val && name && name !== '- Select Server -') {
+          const decoded = decodeMirrorValue(val);
+          if (decoded) iframeUrl = decoded;
         }
+      });
+    }
 
-        servers.push({
-          name,
-          value: val,
-          iframeUrl: decodedUrl,
-          resolution,
-          type: name.toLowerCase().includes('download') ? 'download' : 'stream',
-        });
-      }
-    });
-
-    // Try additional iframe selectors if extractVideoData didn't find one
-    if (!videoData.iframeUrl && !firstDecodedIframe) {
+    // Fallback: try additional iframe selectors
+    if (!iframeUrl) {
       const iframeSelectors = ['#pembed iframe', '.player-embed iframe', '#player iframe'];
       for (const sel of iframeSelectors) {
         const src = $(sel).attr('src') || $(sel).attr('data-src');
         if (src) {
-          firstDecodedIframe = src;
+          iframeUrl = src;
           break;
         }
       }
     }
 
-    // Collect all resolutions
-    const resolutions = [];
-    const seenQualities = new Set();
-
-    servers.forEach(server => {
-      if (server.resolution && server.resolution !== 'Unknown') {
-        if (!seenQualities.has(server.resolution)) {
-          seenQualities.add(server.resolution);
-          resolutions.push({
-            quality: server.resolution,
-            iframe: server.iframeUrl || server.value,
-            server: server.name,
-          });
-        }
-      }
-    });
-
-    // Download links — try multiple selectors for different themes
-    const downloads = [];
-    const dlSelectors = [
-      '.mctnx .soraddl',
-      '.downloadzz .soraddl',
-      '.download-eps .soraddl',
-      '#download-links .soraddl',
-    ];
-    let dlElements = $([]);
-    for (const sel of dlSelectors) {
-      dlElements = $(sel);
-      if (dlElements.length) break;
-    }
-    dlElements.each((i, el) => {
-      const quality = $(el).find('.sorattl h3').text().trim();
-      const links = [];
-      $(el).find('.soraurl a').each((j, a) => {
-        links.push({ host: $(a).text().trim(), url: $(a).attr('href') || '' });
-      });
-      if (quality || links.length) {
-        downloads.push({ quality, links });
-        const resMatch = quality.match(/(\d{3,4})[pP]/);
-        if (resMatch) {
-          const q = resMatch[1] + 'p';
-          if (!seenQualities.has(q)) {
-            seenQualities.add(q);
-            resolutions.push({ quality: q, download: links });
-          }
-        }
-      }
-    });
-
-    // Fallback: flat list layout used by some themes
-    if (downloads.length === 0) {
-      $('.downloadzz ul li').each((i, el) => {
-        const a = $(el).find('a');
-        const text = $(el).text().trim();
-        const href = a.attr('href') || '';
-        if (href) {
-          const resMatch = text.match(/(\d{3,4})[pP]/);
-          const quality = resMatch ? resMatch[1] + 'p' : text;
-          downloads.push({ quality, links: [{ host: a.text().trim(), url: href }] });
-        }
-      });
-    }
-
-    // Sort resolutions: 360p, 480p, 720p, 1080p
-    resolutions.sort((a, b) => {
-      const getNum = (q) => parseInt(q.replace('p', '')) || 0;
-      return getNum(a.quality) - getNum(b.quality);
-    });
-
+    // Anime info
     const animeInfo = {};
     $('.infox .spe span').each((i, el) => {
       const text = $(el).text().trim();
@@ -510,11 +433,12 @@ router.get('/episode/*', async (req, res) => {
           prev: prevEp ? prevEp.replace(BASE + '/', '').replace(/^\/|\/$/g, '') : null,
           next: nextEp ? nextEp.replace(BASE + '/', '').replace(/^\/|\/$/g, '') : null,
         },
-        iframe: videoData.iframeUrl || firstDecodedIframe,
-        servers,
-        resolutions,
-        downloads,
+        iframe: iframeUrl,
         animeInfo,
+        endpoints: {
+          servers: `/api/samehadaku/servers/${slug}`,
+          batch: currentAnimeSlug ? `/api/samehadaku/batch/${currentAnimeSlug}` : null,
+        },
       },
     });
   } catch (e) {
