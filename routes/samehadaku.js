@@ -10,11 +10,45 @@ function getPoster(img) {
   return img.attr('src') || img.attr('data-lazy-src') || img.attr('data-src') || '';
 }
 
-// Helper: Clean slug from href
+// Helper: Clean slug from href — returns episode-style slug (full path segment)
 function cleanSlug(href) {
   let slug = href.replace(BASE, '').replace(/^\/|\/$/g, '');
   slug = slug.replace(/^anime\//, '').split('/')[0];
   return slug;
+}
+
+// Helper: Extract ANIME slug from any URL (episode or anime page)
+// Episode URL: /anime-name-episode-N-subtitle-indonesia/ → anime-name
+// Anime URL:   /anime/anime-name/                        → anime-name
+function cleanAnimeSlug(href) {
+  if (!href) return '';
+  let path = href.replace(BASE, '').replace(/^\/|\/$/g, '');
+
+  // If it's an /anime/ URL, extract directly
+  if (path.startsWith('anime/')) {
+    return path.replace(/^anime\//, '').split('/')[0];
+  }
+
+  // Episode URL pattern: {anime-slug}-episode-{N}[-subtitle-indonesia]
+  const epMatch = path.match(/^(.+?)-episode-\d+/);
+  if (epMatch) {
+    return epMatch[1];
+  }
+
+  // Batch/movie pattern: {anime-slug}-batch[-subtitle-indonesia]
+  const batchMatch = path.match(/^(.+?)-batch/);
+  if (batchMatch) {
+    return batchMatch[1];
+  }
+
+  // Subtitle pattern without episode: {anime-slug}-subtitle-indonesia
+  const subMatch = path.match(/^(.+?)-subtitle-indonesia$/);
+  if (subMatch) {
+    return subMatch[1];
+  }
+
+  // Fallback: return as-is (first path segment)
+  return path.split('/')[0];
 }
 
 // ==================== HOME ====================
@@ -32,12 +66,15 @@ router.get('/home', async (req, res) => {
       const type = $(el).find('.bt .typez');
 
       const href = a.attr('href') || '';
-      const slug = cleanSlug(href);
+      const animeSlug = cleanAnimeSlug(href);
+      const episodeSlug = cleanSlug(href);
 
       latest.push({
-        title: a.attr('title') || img.attr('alt') || '',
-        slug,
+        title: (a.attr('title') || img.attr('alt') || '').replace(/\s*Subtitle Indonesia$/i, '').replace(/\s*Episode\s*\d+.*$/i, '').trim(),
+        slug: animeSlug,
+        episodeSlug,
         url: href,
+        animeUrl: `${BASE}/anime/${animeSlug}/`,
         poster: getPoster(img),
         episode: epx.text().trim(),
         rating: rating.text().trim(),
@@ -47,24 +84,33 @@ router.get('/home', async (req, res) => {
 
     const popular = [];
     $('.serieslist.pop li').each((i, el) => {
-      const a = $(el).find('.leftseries h2 a');
+      // Title link: try h4 first (actual structure), then h2, h3, or any .series link
+      const a = $(el).find('.leftseries h4 a').first().length
+        ? $(el).find('.leftseries h4 a').first()
+        : $(el).find('.leftseries h2 a, .leftseries h3 a, .leftseries a.series').first().length
+          ? $(el).find('.leftseries h2 a, .leftseries h3 a, .leftseries a.series').first()
+          : $(el).find('a[href*="/anime/"]').first();
       const img = $(el).find('img');
-      const rating = $(el).find('.rating .numscore');
+      const rating = $(el).find('.rating .numscore').text().trim() ||
+                     $(el).find('.numscore').text().trim();
       const genres = [];
-      $(el).find('.leftseries .genreseries a').each((j, g) => genres.push($(g).text().trim()));
+      $(el).find('.leftseries .genreseries a, .leftseries span a[href*="/genres/"], .leftseries .genre a').each((j, g) => genres.push($(g).text().trim()));
 
       const href = a.attr('href') || '';
-      const slug = cleanSlug(href);
+      const slug = cleanAnimeSlug(href);
+      const title = a.text().trim() || img.attr('title') || img.attr('alt') || '';
 
-      popular.push({
-        rank: i + 1,
-        title: a.text().trim(),
-        slug,
-        url: href,
-        poster: getPoster(img),
-        rating: rating.text().trim(),
-        genres,
-      });
+      if (slug) {
+        popular.push({
+          rank: i + 1,
+          title,
+          slug,
+          url: href,
+          poster: getPoster(img),
+          rating,
+          genres,
+        });
+      }
     });
 
     res.json({ status: true, creator: 'Gxyenn', data: { latest, popular } });
@@ -89,12 +135,15 @@ router.get('/recent', async (req, res) => {
       const rating = $(el).find('.rating .numscore');
 
       const href = a.attr('href') || '';
-      const slug = cleanSlug(href);
+      const animeSlug = cleanAnimeSlug(href);
+      const episodeSlug = cleanSlug(href);
 
       results.push({
-        title: a.attr('title') || img.attr('alt') || '',
-        slug,
+        title: (a.attr('title') || img.attr('alt') || '').replace(/\s*Subtitle Indonesia$/i, '').replace(/\s*Episode\s*\d+.*$/i, '').trim(),
+        slug: animeSlug,
+        episodeSlug,
         url: href,
+        animeUrl: `${BASE}/anime/${animeSlug}/`,
         poster: getPoster(img),
         episode: epx.text().trim(),
         rating: rating.text().trim(),
@@ -102,6 +151,7 @@ router.get('/recent', async (req, res) => {
     });
 
     const pagination = extractPagination($, page, BASE);
+    pagination.totalItems = results.length > 0 ? results.length : null;
 
     res.json({
       status: true,
@@ -138,10 +188,10 @@ router.get('/search', async (req, res) => {
       const rating = $(el).find('.rating .numscore');
 
       const href = a.attr('href') || '';
-      const slug = cleanSlug(href);
+      const slug = cleanAnimeSlug(href);
 
       results.push({
-        title: a.attr('title') || img.attr('alt') || '',
+        title: (a.attr('title') || img.attr('alt') || '').replace(/\s*Subtitle Indonesia$/i, '').trim(),
         slug,
         url: href,
         poster: getPoster(img),
@@ -157,7 +207,7 @@ router.get('/search', async (req, res) => {
         const a = $(el).find('a').first();
         const img = $(el).find('img').first();
         const href = a.attr('href') || '';
-        const slug = cleanSlug(href);
+        const slug = cleanAnimeSlug(href);
         const title = a.text().trim() || a.attr('title') || img.attr('alt') || '';
         if (title && slug) {
           results.push({
@@ -189,7 +239,7 @@ router.get('/search', async (req, res) => {
               poster = media.source_url || '';
             }
             // Try to extract slug from link
-            const postSlug = cleanSlug(post.link || '');
+            const postSlug = cleanAnimeSlug(post.link || '');
             results.push({
               title: post.title?.rendered ? $(post.title.rendered).text().trim() : '',
               slug: postSlug,
@@ -463,10 +513,10 @@ router.get('/genre/:slug', async (req, res) => {
       const rating = $(el).find('.rating .numscore');
 
       const href = a.attr('href') || '';
-      const animeSlug = cleanSlug(href);
+      const animeSlug = cleanAnimeSlug(href);
 
       results.push({
-        title: a.attr('title') || img.attr('alt') || '',
+        title: (a.attr('title') || img.attr('alt') || '').replace(/\s*Subtitle Indonesia$/i, '').trim(),
         slug: animeSlug,
         url: href,
         poster: getPoster(img),
@@ -503,20 +553,40 @@ router.get('/az-list', async (req, res) => {
 
     const results = [];
     // Multiple selectors for different AZ list layouts
-    $('.listupd .bs, .soralist ul li, .azlist .item, .listanime a').each((i, el) => {
-      const a = $(el).is('a') ? $(el) : $(el).find('a').first();
+    $('.listupd .bs').each((i, el) => {
+      const a = $(el).find('.bsx a');
+      const img = $(el).find('img');
       const href = a.attr('href') || '';
-      const slug = cleanSlug(href);
-      const title = a.text().trim() || a.attr('title') || '';
+      const slug = cleanAnimeSlug(href);
+      const title = (a.attr('title') || img.attr('alt') || '').replace(/\s*Subtitle Indonesia$/i, '').trim();
 
       if (title && slug) {
         results.push({
           title,
           slug,
           url: href,
+          poster: getPoster(img),
         });
       }
     });
+
+    // Fallback: soralist, azlist, listanime
+    if (results.length === 0) {
+      $('.soralist ul li, .azlist .item, .listanime a').each((i, el) => {
+        const a = $(el).is('a') ? $(el) : $(el).find('a').first();
+        const href = a.attr('href') || '';
+        const slug = cleanAnimeSlug(href);
+        const title = a.text().trim() || a.attr('title') || '';
+
+        if (title && slug) {
+          results.push({
+            title,
+            slug,
+            url: href,
+          });
+        }
+      });
+    }
 
     const pagination = extractPagination($, page, BASE);
 
@@ -570,17 +640,18 @@ router.get('/popular', async (req, res) => {
         views = $(el).find('.view, .count').text().trim();
         title = a.attr('title') || img.attr('alt') || a.text().trim();
       } else {
-        // Sidebar widget layout — title is inside nested heading
-        a = $(el).find('a').first();
+        // Sidebar widget layout — title is inside nested heading (h4 or h2/h3)
+        a = $(el).find('.leftseries h4 a').first().length
+          ? $(el).find('.leftseries h4 a').first()
+          : $(el).find('.leftseries h2 a, .leftseries h3 a, .leftseries a.series, a[href*="/anime/"]').first();
         img = $(el).find('img');
         rating = $(el).find('.numscore, .rating').text().trim();
         views = $(el).find('.view, .count').text().trim();
-        // Sidebar often has title in h2/h3 inside the link
-        title = a.text().trim() || a.attr('title') || a.find('h2, h3, h4').text().trim() || '';
+        title = a.text().trim() || a.attr('title') || img.attr('title') || img.attr('alt') || '';
       }
 
       const href = a.attr('href') || '';
-      const slug = cleanSlug(href);
+      const slug = cleanAnimeSlug(href);
 
       if (title && slug) {
         results.push({
@@ -601,7 +672,7 @@ router.get('/popular', async (req, res) => {
         const a = $(el).find('a').first();
         const img = $(el).find('img');
         const href = a.attr('href') || '';
-        const slug = cleanSlug(href);
+        const slug = cleanAnimeSlug(href);
         const title = a.attr('title') || img.attr('alt') || a.text().trim();
         if (title && slug && !results.find(r => r.slug === slug)) {
           results.push({
@@ -645,10 +716,10 @@ router.get('/anime-list', async (req, res) => {
       const rating = $(el).find('.rating .numscore');
 
       const href = a.attr('href') || '';
-      const slug = cleanSlug(href);
+      const slug = cleanAnimeSlug(href);
 
       results.push({
-        title: a.attr('title') || img.attr('alt') || '',
+        title: (a.attr('title') || img.attr('alt') || '').replace(/\s*Subtitle Indonesia$/i, '').trim(),
         slug,
         url: href,
         poster: getPoster(img),

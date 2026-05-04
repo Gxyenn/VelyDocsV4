@@ -139,7 +139,8 @@ router.get('/home', async (req, res) => {
     const props = inertia.props;
 
     // Featured / trending
-    const trending = (props.featured || props.popular || []).map(a => ({
+    const featured = Array.isArray(props.featured) ? props.featured : [];
+    const trending = featured.map(a => ({
       title: a.title || '',
       slug: a.slug || '',
       poster: a.poster || '',
@@ -149,7 +150,8 @@ router.get('/home', async (req, res) => {
     }));
 
     // Latest updates — each anime may contain its latest episode
-    const latest = (props.latestUpdates || []).map(a => {
+    const latestRaw = Array.isArray(props.latestUpdates) ? props.latestUpdates : [];
+    const latest = latestRaw.map(a => {
       const latestEp = Array.isArray(a.episodes) && a.episodes.length
         ? a.episodes[a.episodes.length - 1]
         : null;
@@ -164,35 +166,76 @@ router.get('/home', async (req, res) => {
       };
     });
 
-    // Popular / recommended
-    const popular = (props.popular || props.recommended || []).map(a => ({
+    // Popular — can be an array OR an object with category keys (All, Ongoing, Complete, Movie)
+    let popular = [];
+    if (Array.isArray(props.popular)) {
+      popular = props.popular.map(a => ({
+        title: a.title || '',
+        slug: a.slug || '',
+        poster: a.poster || '',
+        rating: a.rating || '',
+        type: a.type || '',
+        status: a.status || '',
+        url: `${BASE}/anime/${a.slug}`,
+      }));
+    } else if (props.popular && typeof props.popular === 'object') {
+      // Object with categories: { All: [...], Ongoing: [...], ... }
+      const popularObj = {};
+      for (const [category, items] of Object.entries(props.popular)) {
+        if (Array.isArray(items)) {
+          popularObj[category] = items.map(a => ({
+            title: a.title || '',
+            slug: a.slug || '',
+            poster: a.poster || '',
+            rating: a.rating || '',
+            type: a.type || '',
+            status: a.status || '',
+            url: `${BASE}/anime/${a.slug || a.id}`,
+          }));
+        }
+      }
+      // Flatten all categories into one array for backward compat, but also expose categorized
+      popular = Object.values(popularObj).flat();
+      // Add categorized popular as separate field
+      res.locals.popularCategories = popularObj;
+    }
+
+    // Recommended
+    const recommendedRaw = Array.isArray(props.recommended) ? props.recommended : [];
+    const recommended = recommendedRaw.map(a => ({
       title: a.title || '',
       slug: a.slug || '',
       poster: a.poster || '',
       rating: a.rating || '',
       type: a.type || '',
-      status: a.status || '',
-      url: `${BASE}/anime/${a.slug}`,
+      url: `${BASE}/anime/${a.slug || a.id}`,
     }));
 
     // Popular manga
-    const popularManga = (props.popularManga || []).map(a => ({
+    const popularMangaRaw = Array.isArray(props.popularManga) ? props.popularManga : [];
+    const popularManga = popularMangaRaw.map(a => ({
       title: a.title || '',
       slug: a.slug || '',
       poster: a.poster || '',
     }));
 
     // Trending manga
-    const trendingManga = (props.trendingManga || []).map(a => ({
+    const trendingMangaRaw = Array.isArray(props.trendingManga) ? props.trendingManga : [];
+    const trendingManga = trendingMangaRaw.map(a => ({
       title: a.title || '',
       slug: a.slug || '',
       poster: a.poster || '',
     }));
 
+    const responseData = { trending, latest, popular, recommended, popularManga, trendingManga };
+    if (res.locals.popularCategories) {
+      responseData.popularByCategory = res.locals.popularCategories;
+    }
+
     res.json({
       status: true,
       creator: 'Gxyenn',
-      data: { trending, latest, popular, popularManga, trendingManga },
+      data: responseData,
     });
   } catch (e) {
     res.status(500).json({ status: false, message: e.message, creator: 'Gxyenn' });

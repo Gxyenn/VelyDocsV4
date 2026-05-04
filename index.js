@@ -15,7 +15,7 @@ if (process.env.PROXIES) {
   const proxyList = process.env.PROXIES.split(',').map(p => p.trim()).filter(Boolean);
   if (proxyList.length) {
     setProxies(proxyList);
-    console.log(`🛡️ Loaded ${proxyList.length} proxy(ies) for anti-block protection`);
+    console.log(`Loaded ${proxyList.length} proxy(ies) for anti-block protection`);
   }
 }
 
@@ -30,8 +30,60 @@ const PREMIUM_KEYS = new Set([
   'Gxyenn969',
 ]);
 
-// Track usage
+// Track usage per key with sliding window
 const keyUsage = new Map(); // key -> { count, resetTime }
+
+// ==================== ANTI-BLOCK: REQUEST QUEUE ====================
+// Serialize outgoing scrape requests to avoid overwhelming target sites
+// when hundreds of users hit the API simultaneously.
+const requestQueue = [];
+let activeRequests = 0;
+const MAX_CONCURRENT_SCRAPES = parseInt(process.env.MAX_CONCURRENT_SCRAPES) || 5;
+
+function enqueueRequest() {
+  return new Promise(resolve => {
+    if (activeRequests < MAX_CONCURRENT_SCRAPES) {
+      activeRequests++;
+      resolve();
+    } else {
+      requestQueue.push(resolve);
+    }
+  });
+}
+
+function dequeueRequest() {
+  activeRequests--;
+  if (requestQueue.length > 0 && activeRequests < MAX_CONCURRENT_SCRAPES) {
+    activeRequests++;
+    const next = requestQueue.shift();
+    next();
+  }
+}
+
+// Middleware: queue concurrent scrape requests (skip for static endpoints)
+function concurrencyLimiter(req, res, next) {
+  if (req.path === '/' || req.path === '/health' || req.path === '/stats') {
+    return next();
+  }
+  enqueueRequest().then(() => {
+    res.on('finish', dequeueRequest);
+    res.on('close', dequeueRequest);
+    // Safety: ensure dequeue only happens once
+    let dequeued = false;
+    const originalDequeue = dequeueRequest;
+    const safeDequeue = () => {
+      if (!dequeued) {
+        dequeued = true;
+        originalDequeue();
+      }
+    };
+    res.removeAllListeners('finish');
+    res.removeAllListeners('close');
+    res.on('finish', safeDequeue);
+    res.on('close', safeDequeue);
+    next();
+  });
+}
 
 function checkApiKey(req, res, next) {
   const apiKey = req.query.key || req.headers['x-api-key'];
@@ -80,6 +132,7 @@ function checkApiKey(req, res, next) {
             status: false,
             message: 'Rate limit tercapai untuk free key. Coba lagi dalam 1 menit.',
             info: 'Upgrade ke premium: t.me/@Gxyenn969',
+            retryAfter: Math.ceil((usage.resetTime - now) / 1000),
           });
         }
       }
@@ -99,6 +152,9 @@ function checkApiKey(req, res, next) {
 }
 
 // ==================== MIDDLEWARE ====================
+// Trust proxy (needed for rate-limit behind reverse proxies like Nginx/Cloudflare)
+app.set('trust proxy', 1);
+
 app.use(helmet({
   contentSecurityPolicy: false,
   crossOriginEmbedderPolicy: false,
@@ -113,12 +169,16 @@ app.use(cors({
   allowedHeaders: ['Content-Type', 'Authorization', 'X-API-Key'],
 }));
 
-// Rate limiting global (skip untuk premium/admin keys)
+// Rate limiting global - per IP (skip untuk premium/admin keys)
 const limiter = rateLimit({
   windowMs: 15 * 60 * 1000,
-  max: 100,
+  max: 200,  // increased from 100 for high traffic
   standardHeaders: true,
   legacyHeaders: false,
+  keyGenerator: (req) => {
+    // Use API key as rate limit key if available, otherwise IP
+    return req.query.key || req.headers['x-api-key'] || req.ip;
+  },
   message: {
     status: false,
     message: 'Terlalu banyak request, coba lagi nanti.',
@@ -137,6 +197,9 @@ app.use(express.json({ limit: '10mb' }));
 // API Key middleware
 app.use(checkApiKey);
 
+// Concurrency limiter to prevent overwhelming target sites
+app.use(concurrencyLimiter);
+
 // ==================== ROUTES ====================
 const samehadakuRouter = require('./routes/samehadaku');
 const anichinRouter = require('./routes/anichin');
@@ -152,7 +215,7 @@ app.get('/', (req, res) => {
     status: true,
     message: 'VelyDocs V4 - Anime API',
     creator: 'Gxyenn',
-    version: '2.1.0',
+    version: '2.2.0',
     contact: 't.me/@Gxyenn969',
     pricing: {
       free: {
@@ -210,13 +273,18 @@ app.get('/', (req, res) => {
       }
     },
     features: [
-      'Anti-block scraping dengan rotating User-Agents',
+      'Anti-block scraping dengan rotating User-Agents & proxy rotation',
       'Smart caching untuk response cepat',
-      'Pagination lengkap',
+      'Pagination lengkap dengan totalItems',
       'Multiple video resolution support',
       'CORS enabled untuk semua origins',
-      'Rate limiting untuk proteksi',
+      'Rate limiting per-IP dan per-key untuk proteksi',
       'API Key system (Free & Premium)',
+      'Concurrency limiter untuk mencegah blocking dari sumber',
+      'HTTP connection pooling untuk performa tinggi',
+      'Cloudflare challenge detection & bypass',
+      'Adaptive throttling per-domain',
+      'Mendukung ratusan/ribuan user secara bersamaan',
     ],
   });
 });
