@@ -7,6 +7,16 @@ const rateLimit = require('express-rate-limit');
 const app = express();
 const PORT = process.env.PORT || 3000;
 
+// ==================== SECURITY / BOT PROTECTION ====================
+const {
+  botDetector,
+  ipBlacklist,
+  requestValidator,
+  honeypot,
+  ddosProtection,
+  getSecurityStats,
+} = require('./lib/security');
+
 // ==================== ANTI-BLOCK PROXY SUPPORT ====================
 const { setProxies, getSessionStats, clearAllCookies, cache } = require('./lib/scraper');
 
@@ -162,6 +172,31 @@ app.use(helmet({
 
 app.use(compression());
 
+// ==================== SECURITY MIDDLEWARE ====================
+// Helper: check if request carries a premium/admin API key
+function isPremiumRequest(req) {
+  const apiKey = req.query.key || req.headers['x-api-key'];
+  return apiKey && PREMIUM_KEYS.has(apiKey);
+}
+
+// Honeypot endpoints (auto-blacklist scanners) — always active
+app.use(honeypot);
+
+// DDoS protection — skip for premium keys
+app.use((req, res, next) => {
+  if (isPremiumRequest(req)) return next();
+  return ddosProtection(req, res, next);
+});
+
+// Request validation — always active (protects against injection even from premium)
+app.use(requestValidator);
+
+// Bot detector — skip for premium keys
+app.use((req, res, next) => {
+  if (isPremiumRequest(req)) return next();
+  return botDetector(req, res, next);
+});
+
 // CORS - Allow all origins
 app.use(cors({
   origin: '*',
@@ -215,7 +250,7 @@ app.get('/', (req, res) => {
     status: true,
     message: 'VelyDocs V4 - Anime API',
     creator: 'Gxyenn',
-    version: '2.2.0',
+    version: '2.3.0',
     contact: 't.me/@Gxyenn969',
     pricing: {
       free: {
@@ -237,6 +272,8 @@ app.get('/', (req, res) => {
           { method: 'GET', path: '/search?q=naruto&page=1&key=YOUR_KEY', desc: 'Search anime' },
           { method: 'GET', path: '/anime/:slug?key=YOUR_KEY', desc: 'Anime detail with episodes list' },
           { method: 'GET', path: '/episode/:slug?key=YOUR_KEY', desc: 'Episode detail with video servers & downloads' },
+          { method: 'GET', path: '/servers/:episodeSlug?key=YOUR_KEY', desc: 'All servers/mirrors for an episode grouped by quality' },
+          { method: 'GET', path: '/batch/:slug?key=YOUR_KEY', desc: 'Batch download links for an anime' },
           { method: 'GET', path: '/genres?key=YOUR_KEY', desc: 'List all genres' },
           { method: 'GET', path: '/genre/:slug?page=1&key=YOUR_KEY', desc: 'Anime by genre' },
           { method: 'GET', path: '/az-list?letter=A&page=1&key=YOUR_KEY', desc: 'A-Z anime list' },
@@ -252,6 +289,8 @@ app.get('/', (req, res) => {
           { method: 'GET', path: '/explore?page=1&sort=&letter=&status=&type=&key=YOUR_KEY', desc: 'Explore anime with filters' },
           { method: 'GET', path: '/anime/:slug?key=YOUR_KEY', desc: 'Anime detail with episode list' },
           { method: 'GET', path: '/anime/:slug/episode/:number?key=YOUR_KEY', desc: 'Episode with video, servers & downloads' },
+          { method: 'GET', path: '/anime/:slug/episode/:number/servers?key=YOUR_KEY', desc: 'All servers/mirrors for an episode grouped by quality' },
+          { method: 'GET', path: '/batch/:slug?key=YOUR_KEY', desc: 'Batch download links for an anime' },
           { method: 'GET', path: '/search?q=naruto&page=1&key=YOUR_KEY', desc: 'Search anime' },
           { method: 'GET', path: '/movies?page=1&key=YOUR_KEY', desc: 'Anime movies' },
           { method: 'GET', path: '/ongoing?page=1&key=YOUR_KEY', desc: 'Anime ongoing' },
@@ -277,9 +316,17 @@ app.get('/', (req, res) => {
       'Smart caching untuk response cepat',
       'Pagination lengkap dengan totalItems',
       'Multiple video resolution support',
+      'Base64 iframe decoder untuk Samehadaku mirrors',
+      'Batch download endpoints untuk kedua sumber',
+      'Server/mirror listing grouped by quality',
       'CORS enabled untuk semua origins',
       'Rate limiting per-IP dan per-key untuk proteksi',
       'API Key system (Free & Premium)',
+      'Bot detection & auto-blacklist (suspicious UA, missing headers)',
+      'DDoS protection (sliding window rate limiter)',
+      'Request validation (SQL injection, XSS, path traversal)',
+      'Honeypot endpoints (auto-ban scanners)',
+      'IP blacklist management dengan auto-expiry',
       'Concurrency limiter untuk mencegah blocking dari sumber',
       'HTTP connection pooling untuk performa tinggi',
       'Cloudflare challenge detection & bypass',
@@ -305,7 +352,7 @@ app.get('/stats', (req, res) => {
   if (!PREMIUM_KEYS.has(apiKey)) {
     return res.status(403).json({ status: false, message: 'Hanya premium key yang bisa akses stats.' });
   }
-  res.json({ status: true, stats: getSessionStats() });
+  res.json({ status: true, stats: getSessionStats(), security: getSecurityStats() });
 });
 
 // Cache management endpoint (premium only)

@@ -10,6 +10,20 @@ function getPoster(img) {
   return img.attr('src') || img.attr('data-lazy-src') || img.attr('data-src') || '';
 }
 
+// Helper: Decode base64 mirror value to extract iframe src
+function decodeMirrorValue(val) {
+  if (!val) return null;
+  try {
+    const decoded = Buffer.from(val, 'base64').toString('utf-8');
+    const match = decoded.match(/src=["']([^"']+)["']/i);
+    return match ? match[1] : null;
+  } catch {
+    // Not base64, try as direct URL
+    if (val.startsWith('http')) return val;
+    return null;
+  }
+}
+
 // Helper: Clean slug from href — returns episode-style slug (full path segment)
 function cleanSlug(href) {
   let slug = href.replace(BASE, '').replace(/^\/|\/$/g, '');
@@ -363,23 +377,42 @@ router.get('/episode/*', async (req, res) => {
     // Extract video data (iframe & resolutions)
     const videoData = extractVideoData($);
 
-    // Enhanced server extraction with resolution parsing
+    // Enhanced server extraction with resolution parsing and base64 decoding
     const servers = [];
+    let firstDecodedIframe = null;
     $('select.mirror option').each((i, el) => {
       const val = $(el).attr('value');
       const name = $(el).text().trim();
       if (val && name && name !== '- Select Server -') {
         const resMatch = name.match(/(\d{3,4})[pP]/);
         const resolution = resMatch ? resMatch[1] + 'p' : 'Unknown';
+        const decodedUrl = decodeMirrorValue(val);
+
+        if (decodedUrl && !firstDecodedIframe) {
+          firstDecodedIframe = decodedUrl;
+        }
 
         servers.push({
           name,
           value: val,
+          iframeUrl: decodedUrl,
           resolution,
           type: name.toLowerCase().includes('download') ? 'download' : 'stream',
         });
       }
     });
+
+    // Try additional iframe selectors if extractVideoData didn't find one
+    if (!videoData.iframeUrl && !firstDecodedIframe) {
+      const iframeSelectors = ['#pembed iframe', '.player-embed iframe', '#player iframe'];
+      for (const sel of iframeSelectors) {
+        const src = $(sel).attr('src') || $(sel).attr('data-src');
+        if (src) {
+          firstDecodedIframe = src;
+          break;
+        }
+      }
+    }
 
     // Collect all resolutions
     const resolutions = [];
@@ -391,16 +424,27 @@ router.get('/episode/*', async (req, res) => {
           seenQualities.add(server.resolution);
           resolutions.push({
             quality: server.resolution,
-            iframe: server.value,
+            iframe: server.iframeUrl || server.value,
             server: server.name,
           });
         }
       }
     });
 
-    // Download links
+    // Download links — try multiple selectors for different themes
     const downloads = [];
-    $('.mctnx .soraddl').each((i, el) => {
+    const dlSelectors = [
+      '.mctnx .soraddl',
+      '.downloadzz .soraddl',
+      '.download-eps .soraddl',
+      '#download-links .soraddl',
+    ];
+    let dlElements = $([]);
+    for (const sel of dlSelectors) {
+      dlElements = $(sel);
+      if (dlElements.length) break;
+    }
+    dlElements.each((i, el) => {
       const quality = $(el).find('.sorattl h3').text().trim();
       const links = [];
       $(el).find('.soraurl a').each((j, a) => {
@@ -418,6 +462,20 @@ router.get('/episode/*', async (req, res) => {
         }
       }
     });
+
+    // Fallback: flat list layout used by some themes
+    if (downloads.length === 0) {
+      $('.downloadzz ul li').each((i, el) => {
+        const a = $(el).find('a');
+        const text = $(el).text().trim();
+        const href = a.attr('href') || '';
+        if (href) {
+          const resMatch = text.match(/(\d{3,4})[pP]/);
+          const quality = resMatch ? resMatch[1] + 'p' : text;
+          downloads.push({ quality, links: [{ host: a.text().trim(), url: href }] });
+        }
+      });
+    }
 
     // Sort resolutions: 360p, 480p, 720p, 1080p
     resolutions.sort((a, b) => {
@@ -452,11 +510,153 @@ router.get('/episode/*', async (req, res) => {
           prev: prevEp ? prevEp.replace(BASE + '/', '').replace(/^\/|\/$/g, '') : null,
           next: nextEp ? nextEp.replace(BASE + '/', '').replace(/^\/|\/$/g, '') : null,
         },
-        iframe: videoData.iframeUrl,
+        iframe: videoData.iframeUrl || firstDecodedIframe,
         servers,
         resolutions,
         downloads,
         animeInfo,
+      },
+    });
+  } catch (e) {
+    res.status(500).json({ status: false, message: e.message, creator: 'Gxyenn' });
+  }
+});
+
+// ==================== BATCH DOWNLOAD ====================
+router.get('/batch/:slug', async (req, res) => {
+  try {
+    const { slug } = req.params;
+    const url = `${BASE}/${slug}/`;
+    const html = await fetchPage(url, BASE);
+    const $ = cheerio.load(html);
+
+    const title = $('h1.entry-title').text().trim();
+    const animeSlug = cleanAnimeSlug(url);
+
+    // Extract anime info
+    const animeInfo = {};
+    $('.infox .spe span, .spe span').each((i, el) => {
+      const text = $(el).text().trim();
+      const parts = text.split(':');
+      if (parts.length >= 2) {
+        animeInfo[parts[0].trim().toLowerCase().replace(/\s+/g, '_')] = parts.slice(1).join(':').trim();
+      }
+    });
+
+    // Extract batch download links — try multiple selectors
+    const downloads = [];
+    const batchSelectors = [
+      '.mctnx .soraddl',
+      '.batchlink .soraddl',
+      '.download-batch .soraddl',
+      '#batch-download .soraddl',
+    ];
+    let batchElements = $([]);
+    for (const sel of batchSelectors) {
+      batchElements = $(sel);
+      if (batchElements.length) break;
+    }
+    batchElements.each((i, el) => {
+      const quality = $(el).find('.sorattl h3').text().trim();
+      const links = [];
+      $(el).find('.soraurl a').each((j, a) => {
+        links.push({ host: $(a).text().trim(), url: $(a).attr('href') || '' });
+      });
+      if (quality || links.length) {
+        downloads.push({ quality, links });
+      }
+    });
+
+    // Fallback: try broader selectors
+    if (downloads.length === 0) {
+      $('.batchlink a, .download-batch a, #batch-download a').each((i, el) => {
+        const href = $(el).attr('href') || '';
+        const text = $(el).text().trim();
+        if (href && text) {
+          downloads.push({ quality: text, links: [{ host: text, url: href }] });
+        }
+      });
+    }
+
+    res.json({
+      status: true,
+      creator: 'Gxyenn',
+      data: {
+        title,
+        slug,
+        animeSlug,
+        animeInfo,
+        totalDownloads: downloads.length,
+        downloads,
+      },
+    });
+  } catch (e) {
+    res.status(500).json({ status: false, message: e.message, creator: 'Gxyenn' });
+  }
+});
+
+// ==================== SERVERS (Episode Mirrors) ====================
+router.get('/servers/:episodeSlug(*)', async (req, res) => {
+  try {
+    const episodeSlug = req.params.episodeSlug || '';
+    if (!episodeSlug) {
+      return res.status(400).json({ status: false, message: 'Episode slug required', creator: 'Gxyenn' });
+    }
+
+    const url = `${BASE}/${episodeSlug}/`;
+    const html = await fetchPage(url, BASE);
+    const $ = cheerio.load(html);
+
+    const title = $('h1.entry-title').text().trim();
+
+    // Extract all mirror options with decoded iframe URLs
+    const allServers = [];
+    const byQuality = {};
+
+    $('select.mirror option').each((i, el) => {
+      const val = $(el).attr('value');
+      const name = $(el).text().trim();
+      if (val && name && name !== '- Select Server -') {
+        const resMatch = name.match(/(\d{3,4})[pP]/);
+        const resolution = resMatch ? resMatch[1] + 'p' : 'Unknown';
+        const decodedUrl = decodeMirrorValue(val);
+
+        const entry = {
+          name,
+          resolution,
+          iframeUrl: decodedUrl,
+          rawValue: val,
+          type: name.toLowerCase().includes('download') ? 'download' : 'stream',
+        };
+
+        allServers.push(entry);
+
+        if (!byQuality[resolution]) {
+          byQuality[resolution] = [];
+        }
+        byQuality[resolution].push(entry);
+      }
+    });
+
+    // Sort quality keys numerically
+    const sortedQualities = Object.keys(byQuality).sort((a, b) => {
+      const numA = parseInt(a.replace('p', '')) || 0;
+      const numB = parseInt(b.replace('p', '')) || 0;
+      return numA - numB;
+    });
+
+    const grouped = {};
+    sortedQualities.forEach(q => { grouped[q] = byQuality[q]; });
+
+    res.json({
+      status: true,
+      creator: 'Gxyenn',
+      data: {
+        title,
+        slug: episodeSlug,
+        totalServers: allServers.length,
+        servers: allServers,
+        byQuality: grouped,
       },
     });
   } catch (e) {

@@ -51,12 +51,14 @@ function mapEpisode(ep) {
     number: ep.number || '',
     title: ep.title || '',
     slug: ep.slug || '',
-    url: `${BASE}/anime/${ep.anime_id || ''}/episode/${ep.number || ''}`,
+    url: `${BASE}/anime/${ep.anime_slug || ep.anime?.slug || ''}/episode/${ep.number || ''}`,
+    thumbnail: ep.thumbnail || ep.poster || '',
     video_url: ep.video_url || '',
     mirror_streams: ep.mirror_streams || [],
     download_urls: ep.download_urls || [],
     duration: ep.duration || '',
     release_date: ep.release_date || '',
+    created_at: ep.created_at || ep.release_date || '',
   };
 }
 
@@ -380,7 +382,37 @@ router.get('/anime/:slug/episode/:number', async (req, res) => {
       });
     }
 
-    const mirrorStreams = episode.mirror_streams || [];
+    // --- Video URL: check multiple fields ---
+    let videoUrl = episode.video_url || episode.iframe || episode.embed_url || '';
+
+    // Fallback: extract iframe src from raw HTML if no video URL found
+    if (!videoUrl) {
+      const $ = cheerio.load(html);
+      const iframeSrc = $('iframe[src]').first().attr('src');
+      if (iframeSrc) {
+        videoUrl = iframeSrc.startsWith('http') ? iframeSrc : absUrl(iframeSrc);
+      }
+    }
+
+    // --- Servers: check episode.servers array ---
+    const servers = (Array.isArray(episode.servers) ? episode.servers : []).map(s => ({
+      name: s.name || s.label || s.server || '',
+      url: s.url || s.src || s.embed || '',
+      quality: s.quality || s.resolution || '',
+      type: (s.type || 'stream').toLowerCase() === 'download' ? 'download' : 'stream',
+    }));
+
+    // --- Mirror streams: handle both array and quality-keyed object ---
+    let mirrorStreams = episode.mirror_streams || [];
+    if (mirrorStreams && !Array.isArray(mirrorStreams) && typeof mirrorStreams === 'object') {
+      // Convert { "720p": "url", "1080p": "url" } to array format
+      mirrorStreams = Object.entries(mirrorStreams).map(([quality, url]) => ({
+        label: quality,
+        url: typeof url === 'string' ? url : (url && url.url) || '',
+        quality,
+      }));
+    }
+
     const downloadUrls = episode.download_urls || [];
     const resolutions = buildResolutions(mirrorStreams, downloadUrls);
 
@@ -430,7 +462,8 @@ router.get('/anime/:slug/episode/:number', async (req, res) => {
         title: episode.title || `${anime?.title || slug} Episode ${number}`,
         slug,
         episode: episode.number || number,
-        video_url: episode.video_url || '',
+        video_url: videoUrl,
+        servers,
         mirror_streams: mirrorStreams,
         download_urls: downloadUrls,
         resolutions,
@@ -438,6 +471,199 @@ router.get('/anime/:slug/episode/:number', async (req, res) => {
         release_date: episode.release_date || '',
         navigation: { prev, next },
         anime_info: animeInfo,
+      },
+    });
+  } catch (e) {
+    res.status(500).json({ status: false, message: e.message, creator: 'Gxyenn' });
+  }
+});
+
+// ==================== SERVERS ====================
+router.get('/anime/:slug/episode/:number/servers', async (req, res) => {
+  try {
+    const { slug, number } = req.params;
+    const url = `${BASE}/anime/${slug}/episode/${number}`;
+
+    const html = await fetchPage(url, `${BASE}/anime/${slug}`);
+    const inertia = extractInertia(html);
+
+    if (!inertia || !inertia.props || !inertia.props.episode) {
+      return res.status(404).json({
+        status: false,
+        message: `Server data unavailable for ${slug} episode ${number}`,
+        creator: 'Gxyenn',
+      });
+    }
+
+    const episode = inertia.props.episode;
+
+    // Collect all servers from various possible fields
+    const allServers = [];
+
+    // From episode.servers array
+    if (Array.isArray(episode.servers)) {
+      episode.servers.forEach(s => {
+        allServers.push({
+          name: s.name || s.label || s.server || '',
+          url: s.url || s.src || s.embed || '',
+          quality: s.quality || s.resolution || '',
+          type: (s.type || 'stream').toLowerCase() === 'download' ? 'download' : 'stream',
+        });
+      });
+    }
+
+    // From mirror_streams (array or object)
+    let mirrorStreams = episode.mirror_streams || [];
+    if (mirrorStreams && !Array.isArray(mirrorStreams) && typeof mirrorStreams === 'object') {
+      mirrorStreams = Object.entries(mirrorStreams).map(([quality, url]) => ({
+        label: quality,
+        url: typeof url === 'string' ? url : (url && url.url) || '',
+        quality,
+      }));
+    }
+    if (Array.isArray(mirrorStreams)) {
+      mirrorStreams.forEach(m => {
+        allServers.push({
+          name: m.label || m.name || m.server || '',
+          url: m.url || '',
+          quality: m.quality || m.label || '',
+          type: 'stream',
+        });
+      });
+    }
+
+    // From download_urls
+    (episode.download_urls || []).forEach(d => {
+      allServers.push({
+        name: d.label || d.name || d.server || '',
+        url: d.url || '',
+        quality: d.quality || d.label || '',
+        type: 'download',
+      });
+    });
+
+    // Iframe / embed fallbacks
+    const iframeUrl = episode.iframe || episode.embed_url || episode.video_url || '';
+    if (iframeUrl && !allServers.some(s => s.url === iframeUrl)) {
+      allServers.push({
+        name: 'Default',
+        url: iframeUrl,
+        quality: '',
+        type: 'stream',
+      });
+    }
+
+    // Fallback: extract iframe from raw HTML
+    if (allServers.length === 0) {
+      const $ = cheerio.load(html);
+      $('iframe[src]').each((i, el) => {
+        const src = $(el).attr('src');
+        if (src) {
+          allServers.push({
+            name: `Iframe ${i + 1}`,
+            url: src.startsWith('http') ? src : absUrl(src),
+            quality: '',
+            type: 'stream',
+          });
+        }
+      });
+    }
+
+    // Group by quality
+    const grouped = {};
+    allServers.forEach(s => {
+      const key = s.quality || 'unknown';
+      if (!grouped[key]) grouped[key] = [];
+      grouped[key].push(s);
+    });
+
+    res.json({
+      status: true,
+      creator: 'Gxyenn',
+      data: {
+        slug,
+        episode: number,
+        total_servers: allServers.length,
+        servers: allServers,
+        grouped_by_quality: grouped,
+      },
+    });
+  } catch (e) {
+    res.status(500).json({ status: false, message: e.message, creator: 'Gxyenn' });
+  }
+});
+
+// ==================== BATCH DOWNLOAD ====================
+router.get('/batch/:slug', async (req, res) => {
+  try {
+    const { slug } = req.params;
+    const url = `${BASE}/anime/${slug}`;
+
+    const html = await fetchPage(url, BASE);
+    const inertia = extractInertia(html);
+
+    if (!inertia || !inertia.props || !inertia.props.anime) {
+      return res.status(404).json({
+        status: false,
+        message: `Anime "${slug}" not found or Inertia data unavailable`,
+        creator: 'Gxyenn',
+      });
+    }
+
+    const anime = inertia.props.anime;
+    const props = inertia.props;
+
+    // Look for batch downloads in multiple possible locations
+    let batchDownloads = anime.batch_downloads || props.batch || anime.downloads || null;
+
+    // If not found in Inertia, try fetching the batch page as fallback
+    if (!batchDownloads) {
+      try {
+        const batchUrl = `${BASE}/anime/${slug}/batch`;
+        const batchHtml = await fetchPage(batchUrl, url);
+        const batchInertia = extractInertia(batchHtml);
+        if (batchInertia && batchInertia.props) {
+          batchDownloads =
+            batchInertia.props.batch_downloads ||
+            batchInertia.props.batch ||
+            batchInertia.props.downloads ||
+            (batchInertia.props.anime && batchInertia.props.anime.batch_downloads) ||
+            null;
+        }
+      } catch (_) {
+        // Batch page may not exist — that is fine
+      }
+    }
+
+    // Normalize batch downloads to array
+    let downloads = [];
+    if (Array.isArray(batchDownloads)) {
+      downloads = batchDownloads.map(d => ({
+        name: d.name || d.label || d.server || '',
+        url: d.url || d.link || '',
+        quality: d.quality || d.resolution || '',
+        size: d.size || '',
+      }));
+    } else if (batchDownloads && typeof batchDownloads === 'object') {
+      // Could be quality-keyed: { "720p": "url", "1080p": { url, size } }
+      downloads = Object.entries(batchDownloads).map(([key, val]) => ({
+        name: key,
+        url: typeof val === 'string' ? val : (val && (val.url || val.link)) || '',
+        quality: key,
+        size: (val && val.size) || '',
+      }));
+    }
+
+    res.json({
+      status: true,
+      creator: 'Gxyenn',
+      data: {
+        title: anime.title || '',
+        slug: anime.slug || slug,
+        poster: anime.poster || '',
+        total_episodes: anime.episodes_count || 0,
+        batch_available: downloads.length > 0,
+        downloads,
       },
     });
   } catch (e) {
