@@ -65,6 +65,82 @@ function cleanAnimeSlug(href) {
   return path.split('/')[0];
 }
 
+// Helper: Extract all download links from a cheerio page (used by batch & servers)
+function extractBatchDownloads($) {
+  const downloads = [];
+
+  // Method 1: .soraddl layout (tema utama Samehadaku)
+  let dlElements = $([]);
+  const selectors = [
+    '.mctnx .soraddl', '.batchlink .soraddl', '.download-batch .soraddl',
+    '#batch-download .soraddl', '.dlbod .soraddl', '.bixbox .soraddl',
+    '.downloadzz .soraddl', '.download-eps .soraddl', '#download-links .soraddl',
+  ];
+  for (const sel of selectors) {
+    dlElements = $(sel);
+    if (dlElements.length) break;
+  }
+  if (!dlElements.length) dlElements = $('.soraddl');
+
+  dlElements.each((i, el) => {
+    const quality = $(el).find('.sorattl h3, .sorattl span, .sorattl').first().text().trim();
+    const links = [];
+    $(el).find('.soraurl a').each((j, a) => {
+      const host = $(a).text().trim();
+      const href = $(a).attr('href') || '';
+      if (host && href) links.push({ host, url: href });
+    });
+    if (quality || links.length) downloads.push({ quality, links });
+  });
+
+  // Method 2: Flat list
+  if (downloads.length === 0) {
+    $('.batchlink a, .download-batch a, #batch-download a, .batch-dl a, .downloadzz ul li a').each((i, el) => {
+      const href = $(el).attr('href') || '';
+      const text = $(el).text().trim();
+      if (href && text && !href.includes('javascript:') && !href.startsWith('#')) {
+        const resMatch = text.match(/(\d{3,4})[pP]/);
+        const quality = resMatch ? resMatch[1] + 'p' : '';
+        downloads.push({ quality, links: [{ host: text, url: href }] });
+      }
+    });
+  }
+
+  // Method 3: Table-based
+  if (downloads.length === 0) {
+    $('table tr').each((i, el) => {
+      if (i === 0 && $(el).find('th').length) return;
+      const tds = $(el).find('td');
+      if (tds.length >= 2) {
+        const quality = $(tds[0]).text().trim();
+        const links = [];
+        $(el).find('a').each((j, a) => {
+          const host = $(a).text().trim();
+          const href = $(a).attr('href') || '';
+          if (host && href && !href.includes('javascript:')) links.push({ host, url: href });
+        });
+        if (links.length) downloads.push({ quality, links });
+      }
+    });
+  }
+
+  // Method 4: Generic download scan
+  if (downloads.length === 0) {
+    $('a[href*="download"], a[href*="dl."], a[class*="download"], a[class*="dl-btn"]').each((i, el) => {
+      const href = $(el).attr('href') || '';
+      const text = $(el).text().trim();
+      if (href && text && !href.includes('javascript:') && !href.startsWith('#')) {
+        if (downloads.some(d => d.links.some(l => l.url === href))) return;
+        const resMatch = text.match(/(\d{3,4})[pP]/);
+        const quality = resMatch ? resMatch[1] + 'p' : '';
+        downloads.push({ quality, links: [{ host: text, url: href }] });
+      }
+    });
+  }
+
+  return downloads;
+}
+
 // ==================== HOME ====================
 router.get('/home', async (req, res) => {
   try {
@@ -373,10 +449,80 @@ router.get('/episode/*', async (req, res) => {
     const $ = cheerio.load(html);
 
     const title = $('h1.entry-title').text().trim();
-    const prevEp = $('.naveps .nvs.l a').attr('href') || '';
-    const nextEp = $('.naveps .nvs.r a').attr('href') || '';
 
-    // Extract default iframe URL
+    // ============ NAVIGATION (prev/next) ============
+    // Struktur DOM: .naveps.bignav > .nvs (3 divs: prev, all-episodes, next)
+    // Prev disabled = <span class="nolink">, enabled = <a>
+    // Next: <a aria-label="next">, All: .nvs.nvsc <a href="/anime/slug/">
+    let prevEp = '';
+    let nextEp = '';
+
+    // Method 1: aria-label based (most reliable)
+    const prevByAria = $('.naveps a[aria-label="prev"], .naveps a[aria-label="previous"]').attr('href') || '';
+    const nextByAria = $('.naveps a[aria-label="next"]').attr('href') || '';
+    if (prevByAria) prevEp = prevByAria;
+    if (nextByAria) nextEp = nextByAria;
+
+    // Method 2: rel="prev" / rel="next"
+    if (!prevEp) prevEp = $('.naveps a[rel="prev"]').attr('href') || '';
+    if (!nextEp) nextEp = $('.naveps a[rel="next"]').attr('href') || '';
+
+    // Method 3: Posisi di .naveps - first .nvs a = prev, last .nvs a = next
+    if (!prevEp || !nextEp) {
+      const nvsItems = $('.naveps .nvs');
+      if (nvsItems.length >= 3) {
+        // First nvs = prev, last nvs = next
+        if (!prevEp) {
+          const firstA = nvsItems.first().find('a').attr('href') || '';
+          // Pastikan bukan link ke /anime/ (all episodes)
+          if (firstA && !firstA.includes('/anime/')) prevEp = firstA;
+        }
+        if (!nextEp) {
+          const lastA = nvsItems.last().find('a').attr('href') || '';
+          if (lastA && !lastA.includes('/anime/')) nextEp = lastA;
+        }
+      } else if (nvsItems.length === 2) {
+        // Bisa hanya prev+all atau all+next
+        nvsItems.each((i, el) => {
+          const a = $(el).find('a');
+          const href = a.attr('href') || '';
+          if (!href || href.includes('/anime/')) return;
+          const text = $(el).text().trim().toLowerCase();
+          if (text.includes('prev') && !prevEp) prevEp = href;
+          else if (text.includes('next') && !nextEp) nextEp = href;
+        });
+      }
+    }
+
+    // Method 4: Old-style selectors
+    if (!prevEp) prevEp = $('.naveps .nvs.l a').attr('href') || '';
+    if (!nextEp) nextEp = $('.naveps .nvs.r a').attr('href') || '';
+
+    // Method 5: Fallback - episode list (.episodelist) untuk cari prev/next
+    if (!prevEp || !nextEp) {
+      const episodeItems = [];
+      $('.episodelist ul li a, .eplister ul li a').each((i, el) => {
+        const href = $(el).attr('href') || '';
+        if (href) episodeItems.push(href);
+      });
+      // Episode list biasanya newest first, jadi reverse untuk chronological order
+      const chronological = [...episodeItems].reverse();
+      const currentIdx = chronological.findIndex(href =>
+        href.includes(slug) || href.replace(BASE + '/', '').replace(/\/$/, '') === slug
+      );
+      if (currentIdx !== -1) {
+        if (!prevEp && currentIdx > 0) prevEp = chronological[currentIdx - 1];
+        if (!nextEp && currentIdx < chronological.length - 1) nextEp = chronological[currentIdx + 1];
+      }
+    }
+
+    // Clean slugs
+    const cleanNavSlug = (href) => {
+      if (!href) return null;
+      return href.replace(BASE + '/', '').replace(BASE, '').replace(/^\/|\/$/g, '') || null;
+    };
+
+    // ============ IFRAME ============
     const videoData = extractVideoData($);
     let iframeUrl = videoData.iframeUrl || null;
 
@@ -386,7 +532,7 @@ router.get('/episode/*', async (req, res) => {
         if (iframeUrl) return;
         const val = $(el).attr('value');
         const name = $(el).text().trim();
-        if (val && name && name !== '- Select Server -') {
+        if (val && name && name !== 'Select Video Server' && name !== '- Select Server -') {
           const decoded = decodeMirrorValue(val);
           if (decoded) iframeUrl = decoded;
         }
@@ -395,7 +541,7 @@ router.get('/episode/*', async (req, res) => {
 
     // Fallback: try additional iframe selectors
     if (!iframeUrl) {
-      const iframeSelectors = ['#pembed iframe', '.player-embed iframe', '#player iframe'];
+      const iframeSelectors = ['#pembed iframe', '.player-embed iframe', '#player iframe', 'iframe[allowfullscreen]'];
       for (const sel of iframeSelectors) {
         const src = $(sel).attr('src') || $(sel).attr('data-src');
         if (src) {
@@ -405,9 +551,9 @@ router.get('/episode/*', async (req, res) => {
       }
     }
 
-    // Anime info
+    // ============ ANIME INFO ============
     const animeInfo = {};
-    $('.infox .spe span').each((i, el) => {
+    $('.infox .spe span, .spe span').each((i, el) => {
       const text = $(el).text().trim();
       const parts = text.split(':');
       if (parts.length >= 2) {
@@ -415,12 +561,47 @@ router.get('/episode/*', async (req, res) => {
       }
     });
 
-    // Get current anime slug for navigation
+    // ============ ANIME SLUG ============
     let currentAnimeSlug = '';
-    const animeLink = $('.naveps .nvs a[href*="/anime/"]').attr('href') || '';
+    // Method 1: dari naveps link ke /anime/
+    const animeLink = $('.naveps .nvs a[href*="/anime/"], .naveps .nvsc a[href*="/anime/"]').attr('href') || '';
     if (animeLink) {
-      currentAnimeSlug = animeLink.replace(BASE + '/anime/', '').replace(/\//g, '');
+      currentAnimeSlug = animeLink.replace(BASE + '/anime/', '').replace(/^\/|\/$/g, '').split('/')[0];
     }
+    // Method 2: dari .year a link ke /anime/
+    if (!currentAnimeSlug) {
+      const yearLink = $('.year a[href*="/anime/"]').attr('href') || '';
+      if (yearLink) {
+        currentAnimeSlug = yearLink.replace(BASE + '/anime/', '').replace(/^\/|\/$/g, '').split('/')[0];
+      }
+    }
+    // Method 3: extract dari slug episode
+    if (!currentAnimeSlug) {
+      currentAnimeSlug = cleanAnimeSlug(url);
+    }
+
+    // ============ EPISODE LIST (dari halaman episode) ============
+    const episodeList = [];
+    $('.episodelist ul li, .eplister ul li').each((i, el) => {
+      const a = $(el).find('a');
+      const href = a.attr('href') || '';
+      const epTitle = $(el).find('h3, .epl-title, .playinfo h3').text().trim();
+      const epDate = $(el).find('span, .epl-date, .playinfo span').text().trim();
+      const isSelected = $(el).hasClass('selected');
+      let epSlug = href.replace(BASE + '/', '').replace(/^\/|\/$/g, '');
+
+      if (epSlug) {
+        // Extract episode number dari title
+        const numMatch = epTitle.match(/Episode\s+(\d+)/i) || epDate.match(/Eps?\s+(\d+)/i);
+        episodeList.push({
+          number: numMatch ? numMatch[1] : '',
+          title: epTitle,
+          slug: epSlug,
+          date: epDate.replace(/^Eps?\s+\d+\s*-\s*/, '').trim(),
+          current: isSelected,
+        });
+      }
+    });
 
     res.json({
       status: true,
@@ -430,11 +611,12 @@ router.get('/episode/*', async (req, res) => {
         slug,
         animeSlug: currentAnimeSlug,
         navigation: {
-          prev: prevEp ? prevEp.replace(BASE + '/', '').replace(/^\/|\/$/g, '') : null,
-          next: nextEp ? nextEp.replace(BASE + '/', '').replace(/^\/|\/$/g, '') : null,
+          prev: cleanNavSlug(prevEp),
+          next: cleanNavSlug(nextEp),
         },
         iframe: iframeUrl,
         animeInfo,
+        episodeList,
         endpoints: {
           servers: `/api/samehadaku/servers/${slug}`,
           batch: currentAnimeSlug ? `/api/samehadaku/batch/${currentAnimeSlug}` : null,
@@ -447,17 +629,62 @@ router.get('/episode/*', async (req, res) => {
 });
 
 // ==================== BATCH DOWNLOAD (Full Scraping) ====================
-// Endpoint ini mengambil SEMUA batch download links dari halaman batch,
-// termasuk semua kualitas (360p, 480p, 720p, 1080p) dan semua host.
+// Endpoint ini mengambil SEMUA batch download links.
+// Mencoba halaman batch langsung, halaman anime detail, dan variasi URL.
 router.get('/batch/:slug', async (req, res) => {
   try {
     const { slug } = req.params;
-    const url = `${BASE}/${slug}/`;
-    const html = await fetchPage(url, BASE);
-    const $ = cheerio.load(html);
+    const animeSlug = cleanAnimeSlug(`${BASE}/${slug}/`) || slug;
 
-    const title = $('h1.entry-title').text().trim();
-    const animeSlug = cleanAnimeSlug(url);
+    // Coba beberapa URL untuk menemukan halaman batch
+    const urlCandidates = [
+      `${BASE}/${slug}/`,                                    // Direct slug (e.g., naruto-batch-subtitle-indonesia)
+      `${BASE}/${animeSlug}-batch-subtitle-indonesia/`,      // Common batch URL pattern
+      `${BASE}/${animeSlug}-batch/`,                          // Short batch pattern
+      `${BASE}/anime/${slug}/`,                               // Anime detail page (may have batch links)
+      `${BASE}/anime/${animeSlug}/`,                          // Anime detail page (cleaned slug)
+    ];
+
+    let $page = null;
+    let pageTitle = '';
+    let downloads = [];
+    let usedUrl = '';
+
+    for (const candidateUrl of urlCandidates) {
+      try {
+        const html = await fetchPage(candidateUrl, BASE);
+        const $ = cheerio.load(html);
+        pageTitle = $('h1.entry-title').text().trim();
+
+        // Coba extract download links dari halaman ini
+        const pageDownloads = extractBatchDownloads($);
+
+        if (pageDownloads.length > 0) {
+          downloads = pageDownloads;
+          $page = $;
+          usedUrl = candidateUrl;
+          break;
+        }
+
+        // Simpan $page pertama yang berhasil load (untuk anime info)
+        if (!$page) {
+          $page = $;
+          usedUrl = candidateUrl;
+        }
+      } catch (_) {
+        // URL tidak ada, lanjut ke berikutnya
+      }
+    }
+
+    if (!$page) {
+      return res.status(404).json({
+        status: false,
+        message: `Batch download tidak ditemukan untuk "${slug}"`,
+        creator: 'Gxyenn',
+      });
+    }
+
+    const $ = $page;
 
     // Extract anime info
     const animeInfo = {};
@@ -469,114 +696,6 @@ router.get('/batch/:slug', async (req, res) => {
       }
     });
 
-    // ============ EXTRACT ALL DOWNLOAD LINKS ============
-    const downloads = [];
-
-    // Method 1: .soraddl layout (tema utama Samehadaku)
-    const batchSelectors = [
-      '.mctnx .soraddl',
-      '.batchlink .soraddl',
-      '.download-batch .soraddl',
-      '#batch-download .soraddl',
-      '.dlbod .soraddl',
-      '.bixbox .soraddl',
-    ];
-    let batchElements = $([]);
-    for (const sel of batchSelectors) {
-      batchElements = $(sel);
-      if (batchElements.length) break;
-    }
-    // Fallback: semua .soraddl
-    if (!batchElements.length) {
-      batchElements = $('.soraddl');
-    }
-    batchElements.each((i, el) => {
-      const quality = $(el).find('.sorattl h3, .sorattl span, .sorattl').first().text().trim();
-      const links = [];
-      $(el).find('.soraurl a').each((j, a) => {
-        const host = $(a).text().trim();
-        const href = $(a).attr('href') || '';
-        if (host && href) {
-          links.push({ host, url: href });
-        }
-      });
-      if (quality || links.length) {
-        downloads.push({ quality, links });
-      }
-    });
-
-    // Method 2: Flat list layout
-    if (downloads.length === 0) {
-      $('.batchlink a, .download-batch a, #batch-download a, .batch-dl a').each((i, el) => {
-        const href = $(el).attr('href') || '';
-        const text = $(el).text().trim();
-        if (href && text && !href.includes('javascript:') && !href.startsWith('#')) {
-          const resMatch = text.match(/(\d{3,4})[pP]/);
-          const quality = resMatch ? resMatch[1] + 'p' : '';
-          downloads.push({ quality, links: [{ host: text, url: href }] });
-        }
-      });
-    }
-
-    // Method 3: Table-based batch download
-    if (downloads.length === 0) {
-      $('table tr').each((i, el) => {
-        if (i === 0 && $(el).find('th').length) return;
-        const tds = $(el).find('td');
-        if (tds.length >= 2) {
-          const quality = $(tds[0]).text().trim();
-          const links = [];
-          $(el).find('a').each((j, a) => {
-            const host = $(a).text().trim();
-            const href = $(a).attr('href') || '';
-            if (host && href && !href.includes('javascript:')) {
-              links.push({ host, url: href });
-            }
-          });
-          if (links.length) downloads.push({ quality, links });
-        }
-      });
-    }
-
-    // Method 4: .downloadzz layout
-    if (downloads.length === 0) {
-      $('.downloadzz .soraddl, .downloadzz ul li').each((i, el) => {
-        if ($(el).is('li')) {
-          const a = $(el).find('a');
-          const href = a.attr('href') || '';
-          const text = $(el).text().trim();
-          if (href) {
-            const resMatch = text.match(/(\d{3,4})[pP]/);
-            const quality = resMatch ? resMatch[1] + 'p' : text;
-            downloads.push({ quality, links: [{ host: a.text().trim(), url: href }] });
-          }
-        } else {
-          const quality = $(el).find('.sorattl h3, .sorattl span, .sorattl').first().text().trim();
-          const links = [];
-          $(el).find('.soraurl a').each((j, a) => {
-            const host = $(a).text().trim();
-            const href = $(a).attr('href') || '';
-            if (host && href) links.push({ host, url: href });
-          });
-          if (quality || links.length) downloads.push({ quality, links });
-        }
-      });
-    }
-
-    // Method 5: Generic download link scan
-    if (downloads.length === 0) {
-      $('a[href*="download"], a[href*="dl."], a[class*="download"], a[class*="dl-btn"]').each((i, el) => {
-        const href = $(el).attr('href') || '';
-        const text = $(el).text().trim();
-        if (href && text && !href.includes('javascript:') && !href.startsWith('#')) {
-          if (downloads.some(d => d.links.some(l => l.url === href))) return;
-          const resMatch = text.match(/(\d{3,4})[pP]/);
-          const quality = resMatch ? resMatch[1] + 'p' : '';
-          downloads.push({ quality, links: [{ host: text, url: href }] });
-        }
-      });
-    }
-
     // ============ GROUP BY QUALITY ============
     const byQuality = {};
     downloads.forEach(dl => {
@@ -587,7 +706,6 @@ router.get('/batch/:slug', async (req, res) => {
       });
     });
 
-    // Sort quality keys
     const sortedQualities = Object.keys(byQuality).sort((a, b) => {
       if (a === 'Unknown' || !a) return 1;
       if (b === 'Unknown' || !b) return -1;
@@ -603,7 +721,7 @@ router.get('/batch/:slug', async (req, res) => {
       status: true,
       creator: 'Gxyenn',
       data: {
-        title,
+        title: pageTitle,
         slug,
         animeSlug,
         animeInfo,
@@ -634,82 +752,79 @@ router.get('/servers/:episodeSlug(*)', async (req, res) => {
 
     const title = $('h1.entry-title').text().trim();
 
-    // ============ 1. STREAMING SERVERS (dari mirror/select dropdown) ============
+    // Helper: cek apakah text adalah placeholder select
+    const isPlaceholder = (name) => {
+      const lower = (name || '').toLowerCase().trim();
+      return !lower || lower === 'select video server' || lower === '- select server -' ||
+             lower === 'select server' || lower === 'pilih server';
+    };
+
+    // Helper: duplikat check by iframeUrl
+    const seenIframes = new Set();
+    const addUnique = (entry, arr, qualityMap) => {
+      const key = entry.iframeUrl || entry.downloadUrl || entry.name;
+      if (seenIframes.has(key)) return;
+      seenIframes.add(key);
+      arr.push(entry);
+      const qKey = entry.resolution || 'Unknown';
+      if (!qualityMap[qKey]) qualityMap[qKey] = [];
+      qualityMap[qKey].push(entry);
+    };
+
+    // ============ 1. STREAMING SERVERS ============
     const streamServers = [];
     const byQuality = {};
 
     // Method 1: select.mirror option (tema utama Samehadaku)
-    $('select.mirror option').each((i, el) => {
+    $('select.mirror option, select[name="mirror"] option').each((i, el) => {
       const val = $(el).attr('value');
       const name = $(el).text().trim();
-      if (val && name && name !== '- Select Server -' && name !== 'Select Server') {
-        const resMatch = name.match(/(\d{3,4})[pP]/);
-        const resolution = resMatch ? resMatch[1] + 'p' : 'Unknown';
-        const decodedUrl = decodeMirrorValue(val);
+      if (!val || isPlaceholder(name)) return;
+      const resMatch = name.match(/(\d{3,4})[pP]/);
+      const resolution = resMatch ? resMatch[1] + 'p' : 'Unknown';
+      const decodedUrl = decodeMirrorValue(val);
 
-        const entry = {
-          name,
-          resolution,
-          iframeUrl: decodedUrl,
-          rawValue: val,
-          type: name.toLowerCase().includes('download') ? 'download' : 'stream',
-        };
-
-        streamServers.push(entry);
-
-        if (!byQuality[resolution]) byQuality[resolution] = [];
-        byQuality[resolution].push(entry);
-      }
+      addUnique({
+        name,
+        resolution,
+        iframeUrl: decodedUrl,
+        type: name.toLowerCase().includes('download') ? 'download' : 'stream',
+      }, streamServers, byQuality);
     });
 
     // Method 2: select[name="server"] option (tema alternatif)
     $('select[name="server"] option, .server-select option').each((i, el) => {
       const val = $(el).attr('value');
       const name = $(el).text().trim();
-      if (val && name && name !== '- Select Server -' && name !== 'Select Server') {
-        // Cek duplikat
-        if (streamServers.some(s => s.rawValue === val)) return;
-        const resMatch = name.match(/(\d{3,4})[pP]/);
-        const resolution = resMatch ? resMatch[1] + 'p' : 'Unknown';
-        const decodedUrl = decodeMirrorValue(val);
+      if (!val || isPlaceholder(name)) return;
+      const resMatch = name.match(/(\d{3,4})[pP]/);
+      const resolution = resMatch ? resMatch[1] + 'p' : 'Unknown';
+      const decodedUrl = decodeMirrorValue(val);
 
-        const entry = {
-          name,
-          resolution,
-          iframeUrl: decodedUrl,
-          rawValue: val,
-          type: 'stream',
-        };
-
-        streamServers.push(entry);
-        if (!byQuality[resolution]) byQuality[resolution] = [];
-        byQuality[resolution].push(entry);
-      }
+      addUnique({
+        name,
+        resolution,
+        iframeUrl: decodedUrl,
+        type: 'stream',
+      }, streamServers, byQuality);
     });
 
-    // Method 3: Tab-based server list (.server-list, .mirror-list)
+    // Method 3: Tab-based server list
     $('.mirror-list ul li, .server-list ul li, .mirrorlist ul li').each((i, el) => {
       const a = $(el).find('a');
       const name = a.text().trim() || $(el).text().trim();
       const dataValue = a.attr('data-value') || a.attr('data-src') || a.attr('data-url') || a.attr('href') || '';
-      if (name && dataValue) {
-        if (streamServers.some(s => s.rawValue === dataValue)) return;
-        const resMatch = name.match(/(\d{3,4})[pP]/);
-        const resolution = resMatch ? resMatch[1] + 'p' : 'Unknown';
-        const decodedUrl = decodeMirrorValue(dataValue);
+      if (!name || !dataValue) return;
+      const resMatch = name.match(/(\d{3,4})[pP]/);
+      const resolution = resMatch ? resMatch[1] + 'p' : 'Unknown';
+      const decodedUrl = decodeMirrorValue(dataValue);
 
-        const entry = {
-          name,
-          resolution,
-          iframeUrl: decodedUrl || (dataValue.startsWith('http') ? dataValue : null),
-          rawValue: dataValue,
-          type: 'stream',
-        };
-
-        streamServers.push(entry);
-        if (!byQuality[resolution]) byQuality[resolution] = [];
-        byQuality[resolution].push(entry);
-      }
+      addUnique({
+        name,
+        resolution,
+        iframeUrl: decodedUrl || (dataValue.startsWith('http') ? dataValue : null),
+        type: 'stream',
+      }, streamServers, byQuality);
     });
 
     // Method 4: Data attributes pada elemen player
@@ -717,88 +832,63 @@ router.get('/servers/:episodeSlug(*)', async (req, res) => {
       const quality = $(el).attr('data-resolution') || $(el).attr('data-quality') || '';
       const src = $(el).attr('data-src') || $(el).attr('data-url') || $(el).attr('href') || '';
       const name = $(el).text().trim() || quality;
-      if (quality && src) {
-        if (streamServers.some(s => s.iframeUrl === src)) return;
-        const resolution = quality.match(/(\d{3,4})[pP]/) ? quality : 'Unknown';
+      if (!quality || !src) return;
+      const resolution = quality.match(/(\d{3,4})[pP]/) ? quality : 'Unknown';
 
-        const entry = { name, resolution, iframeUrl: src, rawValue: src, type: 'stream' };
-        streamServers.push(entry);
-        if (!byQuality[resolution]) byQuality[resolution] = [];
-        byQuality[resolution].push(entry);
-      }
+      addUnique({ name, resolution, iframeUrl: src, type: 'stream' }, streamServers, byQuality);
     });
 
     // Method 5: Resolution buttons/links
     $('.resolution a, .quality a, [class*="resol"] a, [class*="qualit"] a').each((i, el) => {
       const name = $(el).text().trim();
       const src = $(el).attr('href') || $(el).attr('data-src') || '';
-      if (name && src && /\d{3,4}[pP]/.test(name)) {
-        if (streamServers.some(s => s.iframeUrl === src)) return;
-        const resMatch = name.match(/(\d{3,4})[pP]/);
-        const resolution = resMatch ? resMatch[1] + 'p' : 'Unknown';
+      if (!name || !src || !/\d{3,4}[pP]/.test(name)) return;
+      const resMatch = name.match(/(\d{3,4})[pP]/);
+      const resolution = resMatch ? resMatch[1] + 'p' : 'Unknown';
 
-        const entry = { name, resolution, iframeUrl: src, rawValue: src, type: 'stream' };
-        streamServers.push(entry);
-        if (!byQuality[resolution]) byQuality[resolution] = [];
-        byQuality[resolution].push(entry);
-      }
+      addUnique({ name, resolution, iframeUrl: src, type: 'stream' }, streamServers, byQuality);
     });
 
     // Method 6: Semua iframe yang ada di halaman
-    const iframeUrls = new Set(streamServers.map(s => s.iframeUrl).filter(Boolean));
     $('iframe[src]').each((i, el) => {
       const src = $(el).attr('src') || '';
-      if (src && !iframeUrls.has(src) && !src.includes('googleads') && !src.includes('facebook')) {
-        const entry = {
-          name: `Iframe Player ${i + 1}`,
-          resolution: 'Unknown',
-          iframeUrl: src,
-          rawValue: src,
-          type: 'stream',
-        };
-        streamServers.push(entry);
-        if (!byQuality['Unknown']) byQuality['Unknown'] = [];
-        byQuality['Unknown'].push(entry);
-      }
+      if (!src || src.includes('googleads') || src.includes('facebook') || src.includes('recaptcha')) return;
+
+      addUnique({
+        name: `Iframe Player ${i + 1}`,
+        resolution: 'Unknown',
+        iframeUrl: src,
+        type: 'stream',
+      }, streamServers, byQuality);
     });
 
-    // ============ 2. DOWNLOAD LINKS (semua kualitas, semua host) ============
+    // ============ 2. DOWNLOAD LINKS ============
     const downloads = [];
 
-    // Method 1: .soraddl layout (tema utama Samehadaku)
-    const dlSelectors = [
-      '.mctnx .soraddl',
-      '.downloadzz .soraddl',
-      '.download-eps .soraddl',
-      '#download-links .soraddl',
-      '.dlbod .soraddl',
-      '.bixbox .soraddl',
-    ];
+    // Method 1: .soraddl layout
     let dlElements = $([]);
+    const dlSelectors = [
+      '.mctnx .soraddl', '.downloadzz .soraddl', '.download-eps .soraddl',
+      '#download-links .soraddl', '.dlbod .soraddl', '.bixbox .soraddl',
+    ];
     for (const sel of dlSelectors) {
       dlElements = $(sel);
       if (dlElements.length) break;
     }
-    // Jika tidak ketemu dengan single selector, coba gabungan
-    if (!dlElements.length) {
-      dlElements = $('.soraddl');
-    }
+    if (!dlElements.length) dlElements = $('.soraddl');
+
     dlElements.each((i, el) => {
       const quality = $(el).find('.sorattl h3, .sorattl span, .sorattl').first().text().trim();
       const links = [];
       $(el).find('.soraurl a').each((j, a) => {
         const host = $(a).text().trim();
         const href = $(a).attr('href') || '';
-        if (host && href) {
-          links.push({ host, url: href });
-        }
+        if (host && href) links.push({ host, url: href });
       });
-      if (quality || links.length) {
-        downloads.push({ quality, links });
-      }
+      if (quality || links.length) downloads.push({ quality, links });
     });
 
-    // Method 2: Flat list layout (.downloadzz ul li)
+    // Method 2: Flat list layout
     if (downloads.length === 0) {
       $('.downloadzz ul li, .download-list ul li, #download-box ul li').each((i, el) => {
         const a = $(el).find('a');
@@ -815,7 +905,7 @@ router.get('/servers/:episodeSlug(*)', async (req, res) => {
     // Method 3: Table-based download links
     if (downloads.length === 0) {
       $('table.download-table tr, table.dlTable tr, .download-area table tr').each((i, el) => {
-        if (i === 0 && $(el).find('th').length) return; // skip header
+        if (i === 0 && $(el).find('th').length) return;
         const tds = $(el).find('td');
         if (tds.length >= 2) {
           const quality = $(tds[0]).text().trim();
@@ -830,20 +920,7 @@ router.get('/servers/:episodeSlug(*)', async (req, res) => {
       });
     }
 
-    // Method 4: Divisi-based download (.download a, #download a)
-    if (downloads.length === 0) {
-      $('.download a[href], #download a[href], .dl-link a[href], .downloadx a[href]').each((i, el) => {
-        const href = $(el).attr('href') || '';
-        const text = $(el).text().trim();
-        if (href && text && !href.includes('javascript:') && !href.startsWith('#')) {
-          const resMatch = text.match(/(\d{3,4})[pP]/);
-          const quality = resMatch ? resMatch[1] + 'p' : '';
-          downloads.push({ quality, links: [{ host: text, url: href }] });
-        }
-      });
-    }
-
-    // Method 5: Scan semua link dengan kata kunci download di href/class
+    // Method 4: Generic download link scan
     if (downloads.length === 0) {
       $('a[href*="download"], a[href*="dl."], a[class*="download"], a[class*="dl-btn"]').each((i, el) => {
         const href = $(el).attr('href') || '';
@@ -870,7 +947,6 @@ router.get('/servers/:episodeSlug(*)', async (req, res) => {
               resolution: key,
               iframeUrl: null,
               downloadUrl: link.url,
-              rawValue: link.url,
               type: 'download',
             });
           });
@@ -878,7 +954,7 @@ router.get('/servers/:episodeSlug(*)', async (req, res) => {
       }
     });
 
-    // ============ 4. Sort quality keys numerically ============
+    // ============ 4. Sort quality keys ============
     const sortedQualities = Object.keys(byQuality).sort((a, b) => {
       if (a === 'Unknown') return 1;
       if (b === 'Unknown') return -1;
@@ -890,7 +966,7 @@ router.get('/servers/:episodeSlug(*)', async (req, res) => {
     const grouped = {};
     sortedQualities.forEach(q => { grouped[q] = byQuality[q]; });
 
-    // ============ 5. Build quality summary ============
+    // ============ 5. Quality summary ============
     const qualitySummary = sortedQualities
       .filter(q => q !== 'Unknown')
       .map(q => ({
