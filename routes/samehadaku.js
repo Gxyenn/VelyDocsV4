@@ -256,7 +256,11 @@ router.get('/recent', async (req, res) => {
     });
 
     const pagination = extractPagination($, page, BASE);
-    pagination.totalItems = results.length > 0 ? results.length : null;
+    if (results.length > 0 && pagination.totalPages > 0) {
+      pagination.totalItems = results.length * pagination.totalPages;
+    } else {
+      pagination.totalItems = results.length || 0;
+    }
 
     res.json({
       status: true,
@@ -361,6 +365,15 @@ router.get('/search', async (req, res) => {
     }
 
     const pagination = extractPagination($, page, BASE);
+    // Fix: set totalItems correctly for search results  
+    if (results.length === 0) {
+      pagination.totalItems = 0;
+      pagination.totalPages = 1;
+      pagination.hasNextPage = false;
+      pagination.nextPage = null;
+    } else if (pagination.totalItems === null) {
+      pagination.totalItems = results.length;
+    }
 
     res.json({
       status: true,
@@ -656,8 +669,12 @@ router.get('/batch/:slug', async (req, res) => {
       `${BASE}/${slug}/`,                                    // Direct slug (e.g., naruto-batch-subtitle-indonesia)
       `${BASE}/${animeSlug}-batch-subtitle-indonesia/`,      // Common batch URL pattern
       `${BASE}/${animeSlug}-batch/`,                          // Short batch pattern
+      `${BASE}/${slug}-batch-subtitle-indonesia/`,            // Slug as anime name + batch
+      `${BASE}/${slug}-batch/`,                               // Slug as anime name + batch short
       `${BASE}/anime/${slug}/`,                               // Anime detail page (may have batch links)
       `${BASE}/anime/${animeSlug}/`,                          // Anime detail page (cleaned slug)
+      `${BASE}/batch/${slug}/`,                               // Some themes use /batch/ prefix
+      `${BASE}/batch/${animeSlug}/`,                          // /batch/ with cleaned slug
     ];
 
     let $page = null;
@@ -714,7 +731,7 @@ router.get('/batch/:slug', async (req, res) => {
     if (!$page) {
       return res.status(404).json({
         status: false,
-        message: `Batch download tidak ditemukan untuk "${slug}"`,
+        message: `Batch download tidak ditemukan untuk "${slug}". Coba akses langsung di: ${BASE}/anime/${slug}/`,
         creator: 'Gxyenn',
       });
     }
@@ -764,6 +781,8 @@ router.get('/batch/:slug', async (req, res) => {
         totalDownloads: downloads.reduce((sum, d) => sum + d.links.length, 0),
         downloads,
         byQuality: grouped,
+        note: downloads.length === 0 ? 'Download links di Samehadaku di-load via JavaScript. Untuk download, kunjungi halaman anime langsung.' : undefined,
+        animeUrl: `${BASE}/anime/${animeSlug}/`,
       },
     });
   } catch (e) {
@@ -809,6 +828,16 @@ router.get('/servers/:episodeSlug(*)', async (req, res) => {
     // ============ 1. STREAMING SERVERS ============
     const streamServers = [];
     const byQuality = {};
+    
+    // Pre-extract iframe from page (new Samehadaku theme loads servers via JS,
+    // so static HTML only has the embedded iframe)
+    let pageIframeUrl = null;
+    $('iframe').each((i, el) => {
+      const src = $(el).attr('src') || $(el).attr('data-src') || '';
+      if (src && (src.includes('blogger.com') || src.includes('embed') || src.includes('player') || src.includes('video') || src.includes('stream'))) {
+        if (!pageIframeUrl) pageIframeUrl = src;
+      }
+    });
 
     // Method 1: select.mirror option (tema utama Samehadaku)
     $('select.mirror option, select[name="mirror"] option').each((i, el) => {
@@ -1010,7 +1039,20 @@ router.get('/servers/:episodeSlug(*)', async (req, res) => {
         totalDownload: (byQuality[q] || []).filter(s => s.type === 'download').length,
       }));
 
-    // Fallback: extract direct download links (mir.cr, etc.) if downloads is empty
+    // ============ FINAL FALLBACK: Use page iframe if no servers found ============
+    // New Samehadaku theme loads server options via JavaScript (AJAX),
+    // so static HTML only contains the embedded iframe element.
+    if (streamServers.length === 0 && pageIframeUrl) {
+      const serverName = pageIframeUrl.includes('blogger.com') ? 'Blogger Video' : 'Embedded Player';
+      addUnique({
+        name: serverName,
+        resolution: 'Default',
+        iframeUrl: pageIframeUrl,
+        type: 'stream',
+      }, streamServers, byQuality);
+    }
+
+    // Extract direct download links (mir.cr etc.) from static HTML
     if (downloads.length === 0) {
       const directLinks = [];
       $('a[href*="mir.cr"], a[href*="drive.google"], a[href*="mega.nz"], a[href*="mediafire"]').each((j, a) => {
@@ -1025,20 +1067,9 @@ router.get('/servers/:episodeSlug(*)', async (req, res) => {
       }
     }
 
-    // Fallback: extract iframe from player if no streaming servers found
-    if (streamServers.length === 0) {
-      $('iframe').each((i, el) => {
-        const src = $(el).attr('src') || $(el).attr('data-src') || '';
-        if (src && (src.includes('blogger') || src.includes('embed') || src.includes('player') || src.includes('stream') || src.includes('video'))) {
-          addUnique({
-            name: 'Video',
-            resolution: 'Default',
-            iframeUrl: src,
-            type: 'stream',
-          }, streamServers, byQuality);
-        }
-      });
-    }
+    // Add episode URL as a "Watch on Website" reference
+    const episodeUrl = `${BASE}/${episodeSlug}/`;
+
 
     res.json({
       status: true,
@@ -1046,6 +1077,7 @@ router.get('/servers/:episodeSlug(*)', async (req, res) => {
       data: {
         title,
         slug: episodeSlug,
+        episodeUrl: episodeUrl,
         totalServers: streamServers.length,
         totalDownloads: downloads.reduce((sum, d) => sum + d.links.length, 0),
         qualitySummary,
