@@ -480,166 +480,188 @@ router.get('/anime/:slug/episode/:number/servers', async (req, res) => {
     const episode = inertia.props.episode;
     const $ = cheerio.load(html);
 
-    // ============ 1. STREAMING SERVERS ============
+    // Helper: extract resolution (360p, 480p, 720p, 1080p) from any string
+    function extractResolution(str) {
+      if (!str) return 'Unknown';
+      const m = str.match(/(\d{3,4})[pP]/);
+      return m ? m[1] + 'p' : 'Unknown';
+    }
+
+    // Helper: extract file size from string like "Mp4 360p - ODFiles (41.3 MB)"
+    function extractSize(str) {
+      if (!str) return '';
+      const m = str.match(/\(([^)]*[MG]B[^)]*)\)/i);
+      return m ? m[1].trim() : '';
+    }
+
+    // Helper: extract server/host name from string
+    function extractServerName(str) {
+      if (!str) return '';
+      // Remove resolution and size parts
+      let name = str.replace(/\d{3,4}[pP]/g, '').replace(/\([^)]*\)/g, '').replace(/^Mp4\s*/i, '').replace(/^\s*-\s*/, '').replace(/\s*-\s*$/, '').trim();
+      return name || str;
+    }
+
+    // ============ 1. COLLECT ALL SOURCES ============
     const streamServers = [];
     const downloadLinks = [];
     const byQuality = {};
+    const seenUrls = new Set();
+
+    function addEntry(entry, isDownload) {
+      if (!entry.url || seenUrls.has(entry.url)) return;
+      seenUrls.add(entry.url);
+
+      if (isDownload) {
+        downloadLinks.push(entry);
+      } else {
+        streamServers.push(entry);
+      }
+
+      const key = entry.quality || 'Unknown';
+      if (!byQuality[key]) byQuality[key] = [];
+      byQuality[key].push(entry);
+    }
 
     // Source 1: episode.servers array
     if (Array.isArray(episode.servers)) {
       episode.servers.forEach(s => {
-        const name = s.name || s.label || s.server || '';
+        const rawName = s.name || s.label || s.server || '';
         const serverUrl = s.url || s.src || s.embed || '';
-        const quality = s.quality || s.resolution || '';
-        const type = (s.type || 'stream').toLowerCase() === 'download' ? 'download' : 'stream';
+        const quality = extractResolution(s.quality || s.resolution || rawName);
+        const serverName = extractServerName(rawName);
+        const isDownload = (s.type || 'stream').toLowerCase() === 'download';
 
-        const entry = { name, url: serverUrl, quality, type };
-
-        if (type === 'download') {
-          downloadLinks.push(entry);
-        } else {
-          streamServers.push(entry);
-        }
-
-        const key = quality || 'Unknown';
-        if (!byQuality[key]) byQuality[key] = [];
-        byQuality[key].push(entry);
+        addEntry({
+          name: serverName || rawName,
+          url: serverUrl,
+          quality,
+          type: isDownload ? 'download' : 'stream',
+        }, isDownload);
       });
     }
 
-    // Source 2: mirror_streams (array or quality-keyed object)
+    // Source 2: mirror_streams
     let mirrorStreams = episode.mirror_streams || [];
     if (mirrorStreams && !Array.isArray(mirrorStreams) && typeof mirrorStreams === 'object') {
-      mirrorStreams = Object.entries(mirrorStreams).map(([quality, val]) => ({
-        label: quality,
+      mirrorStreams = Object.entries(mirrorStreams).map(([key, val]) => ({
+        label: key,
         url: typeof val === 'string' ? val : (val && (val.url || val.src || val.embed)) || '',
-        quality,
-        server: (val && val.server) || (val && val.name) || quality,
+        server: (val && val.server) || (val && val.name) || key,
       }));
     }
     if (Array.isArray(mirrorStreams)) {
       mirrorStreams.forEach(m => {
-        const name = m.label || m.name || m.server || '';
+        const rawLabel = m.label || m.name || m.server || '';
         const mUrl = m.url || m.src || m.embed || '';
-        const quality = m.quality || m.label || m.resolution || '';
         if (!mUrl) return;
-        // Cek duplikat
-        if (streamServers.some(s => s.url === mUrl)) return;
+        const quality = extractResolution(m.quality || m.label || m.resolution || rawLabel);
+        const serverName = extractServerName(rawLabel);
 
-        const entry = { name, url: mUrl, quality, type: 'stream' };
-        streamServers.push(entry);
-
-        const key = quality || 'Unknown';
-        if (!byQuality[key]) byQuality[key] = [];
-        byQuality[key].push(entry);
+        addEntry({
+          name: serverName || rawLabel,
+          url: mUrl,
+          quality,
+          type: 'stream',
+        }, false);
       });
     }
 
-    // Source 3: download_urls (array or object)
+    // Source 3: download_urls
     let dlUrls = episode.download_urls || episode.downloads || [];
     if (dlUrls && !Array.isArray(dlUrls) && typeof dlUrls === 'object') {
-      dlUrls = Object.entries(dlUrls).map(([quality, val]) => ({
-        label: quality,
+      dlUrls = Object.entries(dlUrls).map(([key, val]) => ({
+        label: key,
         url: typeof val === 'string' ? val : (val && (val.url || val.link)) || '',
-        quality,
-        name: (val && val.name) || (val && val.host) || quality,
+        name: (val && val.name) || (val && val.host) || key,
         size: (val && val.size) || '',
       }));
     }
     if (Array.isArray(dlUrls)) {
       dlUrls.forEach(d => {
-        const name = d.label || d.name || d.server || d.host || '';
+        const rawLabel = d.label || d.name || d.server || d.host || '';
         const dUrl = d.url || d.link || '';
-        const quality = d.quality || d.label || d.resolution || '';
-        const size = d.size || '';
         if (!dUrl) return;
-        if (downloadLinks.some(dl => dl.url === dUrl)) return;
+        const quality = extractResolution(d.quality || d.label || d.resolution || rawLabel);
+        const serverName = extractServerName(rawLabel);
+        const size = d.size || extractSize(rawLabel);
 
-        const entry = { name, url: dUrl, quality, type: 'download', size };
-        downloadLinks.push(entry);
-
-        const key = quality || 'Unknown';
-        if (!byQuality[key]) byQuality[key] = [];
-        byQuality[key].push(entry);
+        addEntry({
+          name: serverName || rawLabel,
+          url: dUrl,
+          quality,
+          type: 'download',
+          size,
+        }, true);
       });
     }
 
-    // Source 4: episode.sources / episode.videos (beberapa tema Inertia)
+    // Source 4: episode.sources / episode.videos
     const extraSources = episode.sources || episode.videos || episode.embeds || [];
     if (Array.isArray(extraSources)) {
       extraSources.forEach(s => {
-        const name = s.name || s.label || s.server || '';
+        const rawName = s.name || s.label || s.server || '';
         const sUrl = s.url || s.src || s.embed || '';
-        const quality = s.quality || s.resolution || '';
         if (!sUrl) return;
-        if (streamServers.some(sv => sv.url === sUrl)) return;
+        const quality = extractResolution(s.quality || s.resolution || rawName);
 
-        const entry = { name, url: sUrl, quality, type: 'stream' };
-        streamServers.push(entry);
-
-        const key = quality || 'Unknown';
-        if (!byQuality[key]) byQuality[key] = [];
-        byQuality[key].push(entry);
+        addEntry({
+          name: extractServerName(rawName) || rawName,
+          url: sUrl,
+          quality,
+          type: 'stream',
+        }, false);
       });
     }
 
-    // Source 5: Iframe / embed URL fallbacks
+    // Source 5: Iframe / embed URL fallback
     const defaultIframe = episode.iframe || episode.embed_url || episode.video_url || '';
     if (defaultIframe) {
-      const alreadyListed = streamServers.some(s => s.url === defaultIframe) ||
-                            downloadLinks.some(d => d.url === defaultIframe);
-      if (!alreadyListed) {
-        const entry = { name: 'Default Player', url: defaultIframe, quality: '', type: 'stream' };
-        streamServers.push(entry);
-        if (!byQuality['Unknown']) byQuality['Unknown'] = [];
-        byQuality['Unknown'].push(entry);
-      }
+      addEntry({
+        name: 'Default Player',
+        url: defaultIframe,
+        quality: 'Unknown',
+        type: 'stream',
+      }, false);
     }
 
-    // Source 6: Extract iframes from raw HTML (fallback)
-    const allListedUrls = new Set([
-      ...streamServers.map(s => s.url),
-      ...downloadLinks.map(d => d.url),
-    ]);
+    // Source 6: Extract iframes from raw HTML
     $('iframe[src]').each((i, el) => {
       const src = $(el).attr('src') || '';
-      if (src && !allListedUrls.has(src) && !src.includes('googleads') && !src.includes('facebook') && !src.includes('google.com/recaptcha')) {
+      if (src && !src.includes('googleads') && !src.includes('facebook') && !src.includes('recaptcha')) {
         const iframeSrc = src.startsWith('http') ? src : absUrl(src);
-        const entry = { name: `Iframe Player ${i + 1}`, url: iframeSrc, quality: '', type: 'stream' };
-        streamServers.push(entry);
-        if (!byQuality['Unknown']) byQuality['Unknown'] = [];
-        byQuality['Unknown'].push(entry);
+        addEntry({
+          name: `Iframe Player ${i + 1}`,
+          url: iframeSrc,
+          quality: 'Unknown',
+          type: 'stream',
+        }, false);
       }
     });
 
-    // Source 7: Scan HTML for video/source elements
+    // Source 7: video/source elements
     $('video source[src]').each((i, el) => {
       const src = $(el).attr('src') || '';
-      const quality = $(el).attr('label') || $(el).attr('data-quality') || $(el).attr('size') || '';
-      if (src && !allListedUrls.has(src)) {
-        const entry = {
-          name: `Direct Video ${quality || i + 1}`,
+      const rawQuality = $(el).attr('label') || $(el).attr('data-quality') || $(el).attr('size') || '';
+      if (src) {
+        const quality = extractResolution(rawQuality);
+        addEntry({
+          name: `Direct Video ${rawQuality || i + 1}`,
           url: src.startsWith('http') ? src : absUrl(src),
-          quality: quality ? quality + (quality.match(/p$/i) ? '' : 'p') : '',
+          quality,
           type: 'stream',
-        };
-        streamServers.push(entry);
-        const key = entry.quality || 'Unknown';
-        if (!byQuality[key]) byQuality[key] = [];
-        byQuality[key].push(entry);
+        }, false);
       }
     });
 
-    // ============ 2. BUILD RESOLUTIONS SUMMARY ============
-    const resolutions = buildResolutions(
-      streamServers.map(s => ({ label: s.name, url: s.url, quality: s.quality })),
-      downloadLinks.map(d => ({ label: d.name, url: d.url, quality: d.quality }))
-    );
-
-    // ============ 3. SORT & GROUP BY QUALITY ============
+    // ============ 2. SORT & GROUP BY QUALITY ============
+    const qualityOrder = ['360p', '480p', '720p', '1080p', 'Unknown'];
     const sortedQualities = Object.keys(byQuality).sort((a, b) => {
-      if (a === 'Unknown' || !a) return 1;
-      if (b === 'Unknown' || !b) return -1;
+      const idxA = qualityOrder.indexOf(a);
+      const idxB = qualityOrder.indexOf(b);
+      if (idxA !== -1 && idxB !== -1) return idxA - idxB;
+      if (idxA !== -1) return -1;
+      if (idxB !== -1) return 1;
       const numA = parseInt(a.replace('p', '')) || 0;
       const numB = parseInt(b.replace('p', '')) || 0;
       return numA - numB;
@@ -648,9 +670,9 @@ router.get('/anime/:slug/episode/:number/servers', async (req, res) => {
     const grouped = {};
     sortedQualities.forEach(q => { grouped[q] = byQuality[q]; });
 
-    // ============ 4. QUALITY SUMMARY ============
+    // ============ 3. QUALITY SUMMARY ============
     const qualitySummary = sortedQualities
-      .filter(q => q !== 'Unknown' && q !== '')
+      .filter(q => q !== 'Unknown')
       .map(q => ({
         quality: q,
         totalStreaming: (byQuality[q] || []).filter(s => s.type === 'stream').length,
@@ -666,7 +688,6 @@ router.get('/anime/:slug/episode/:number/servers', async (req, res) => {
         totalServers: streamServers.length,
         totalDownloads: downloadLinks.length,
         qualitySummary,
-        resolutions,
         servers: streamServers,
         downloads: downloadLinks,
         byQuality: grouped,
