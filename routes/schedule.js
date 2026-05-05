@@ -3,7 +3,7 @@ const cheerio = require('cheerio');
 const router = express.Router();
 const { fetchPage } = require('../lib/scraper');
 
-const SAMEHADAKU_BASE = 'https://samehadaku.li';
+const SAMEHADAKU_BASE = 'https://samehadaku.me';
 const ANICHIN_BASE = 'https://anichin.me';
 
 // Helper functions

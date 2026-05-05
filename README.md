@@ -176,8 +176,8 @@ Server akan berjalan di `http://localhost:3000`
       {
         "title": "One Piece",
         "slug": "one-piece",
-        "url": "https://samehadaku.li/anime/one-piece/",
-        "poster": "https://samehadaku.li/wp-content/uploads/...",
+        "url": "https://samehadaku.me/anime/one-piece/",
+        "poster": "https://samehadaku.me/wp-content/uploads/...",
         "episode": "Episode 1095",
         "rating": "8.5",
         "type": "TV"
@@ -244,7 +244,7 @@ Server akan berjalan di `http://localhost:3000`
 
 ### API Lambat / Timeout
 1. **Cek cache:** Response pertama lambat (fetch dari website target), response berikutnya cepat (dari cache)
-2. **Website target down:** Kalau samehadaku.li atau anichin.me down, API akan timeout. Tunggu beberapa menit.
+2. **Website target down:** Kalau samehadaku.me atau anichin.me down, API akan timeout. Tunggu beberapa menit.
 3. **Gunakan parameter yang spesifik:** Hindari fetch halaman 1 dari endpoint dengan banyak data
 
 ### Error 429 (Rate Limit)

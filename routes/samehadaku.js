@@ -1,9 +1,9 @@
 const express = require('express');
 const cheerio = require('cheerio');
 const router = express.Router();
-const { fetchPage, fetchPageWithBrowser, buildPagination, extractPagination, extractVideoData } = require('../lib/scraper');
+const { fetchPage, buildPagination, extractPagination, extractVideoData } = require('../lib/scraper');
 
-const BASE = 'https://samehadaku.li';
+const BASE = 'https://samehadaku.me';
 
 // Helper: Get full poster URL
 function getPoster(img) {
@@ -144,7 +144,7 @@ function extractBatchDownloads($) {
     $('a[href*="mir.cr"], a[href*="drive.google"], a[href*="mega.nz"], a[href*="mediafire"], a[href*="zippyshare"]').each((j, a) => {
       const href = $(a).attr('href') || '';
       const text = $(a).text().trim();
-      if (href && !href.includes('samehadaku.li') && text && !href.startsWith('#')) {
+      if (href && !href.includes('samehadaku.me') && text && !href.startsWith('#')) {
         directLinks.push({ host: text || 'Direct', url: href });
       }
     });
@@ -679,13 +679,7 @@ router.get('/batch/:slug', async (req, res) => {
 
     for (const candidateUrl of urlCandidates) {
       try {
-        let html;
-        try {
-          // Use browser to render JS content (downloads loaded via JS)
-          html = await fetchPageWithBrowser(candidateUrl, { waitFor: '.soraddl, .soraurl, a[href*="mir.cr"]', timeout: 12000 });
-        } catch {
-          html = await fetchPage(candidateUrl, BASE);
-        }
+        const html = await fetchPage(candidateUrl, BASE);
         const $ = cheerio.load(html);
         pageTitle = $('h1.entry-title').text().trim();
 
@@ -800,14 +794,7 @@ router.get('/servers/:episodeSlug(*)', async (req, res) => {
     }
 
     const url = `${BASE}/${episodeSlug}/`;
-    // Use browser fetch to get JS-rendered content (servers & downloads loaded via JS)
-    let html;
-    try {
-      html = await fetchPageWithBrowser(url, { waitFor: 'select[name="mirror"] option[value]:not([value=""])', timeout: 15000 });
-    } catch (browserErr) {
-      console.log('[SERVERS] Browser fetch failed, falling back to static fetch:', browserErr.message);
-      html = await fetchPage(url, BASE);
-    }
+    const html = await fetchPage(url, BASE);
     const $ = cheerio.load(html);
 
     const title = $('h1.entry-title').text().trim();
