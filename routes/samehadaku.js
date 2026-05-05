@@ -138,6 +138,21 @@ function extractBatchDownloads($) {
     });
   }
 
+  // Fallback: if no .soraddl downloads found, look for direct download links
+  if (downloads.length === 0) {
+    const directLinks = [];
+    $('a[href*="mir.cr"], a[href*="drive.google"], a[href*="mega.nz"], a[href*="mediafire"], a[href*="zippyshare"]').each((j, a) => {
+      const href = $(a).attr('href') || '';
+      const text = $(a).text().trim();
+      if (href && !href.includes('samehadaku.li') && text && !href.startsWith('#')) {
+        directLinks.push({ host: text || 'Direct', url: href });
+      }
+    });
+    if (directLinks.length > 0) {
+      downloads.push({ quality: 'Default', links: directLinks });
+    }
+  }
+
   return downloads;
 }
 
@@ -666,6 +681,26 @@ router.get('/batch/:slug', async (req, res) => {
           break;
         }
 
+        // Fallback: extract direct download links (mir.cr, Google Drive, etc.)
+        // New Samehadaku layout uses simple <a> links instead of .soraddl
+        if (downloads.length === 0) {
+          const directLinks = [];
+          $('a[href*="mir.cr"], a[href*="drive.google"], a[href*="mega.nz"], a[href*="mediafire"], a[href*="zippyshare"], a[href*="download"]').each((j, a) => {
+            const href = $(a).attr('href') || '';
+            const text = $(a).text().trim();
+            // Skip navigation links, social links
+            if (href && !href.includes('samehadaku') && !href.includes('#') && text) {
+              directLinks.push({ host: text || 'Direct', url: href });
+            }
+          });
+          if (directLinks.length > 0) {
+            downloads = [{ quality: 'Default', links: directLinks }];
+            $page = $;
+            usedUrl = candidateUrl;
+            break;
+          }
+        }
+
         // Simpan $page pertama yang berhasil load (untuk anime info)
         if (!$page) {
           $page = $;
@@ -975,6 +1010,36 @@ router.get('/servers/:episodeSlug(*)', async (req, res) => {
         totalDownload: (byQuality[q] || []).filter(s => s.type === 'download').length,
       }));
 
+    // Fallback: extract direct download links (mir.cr, etc.) if downloads is empty
+    if (downloads.length === 0) {
+      const directLinks = [];
+      $('a[href*="mir.cr"], a[href*="drive.google"], a[href*="mega.nz"], a[href*="mediafire"]').each((j, a) => {
+        const href = $(a).attr('href') || '';
+        const text = $(a).text().trim();
+        if (href && !href.includes('samehadaku') && text && !href.startsWith('#')) {
+          directLinks.push({ host: text || 'Direct', url: href });
+        }
+      });
+      if (directLinks.length > 0) {
+        downloads.push({ quality: 'Default', links: directLinks });
+      }
+    }
+
+    // Fallback: extract iframe from player if no streaming servers found
+    if (streamServers.length === 0) {
+      $('iframe').each((i, el) => {
+        const src = $(el).attr('src') || $(el).attr('data-src') || '';
+        if (src && (src.includes('blogger') || src.includes('embed') || src.includes('player') || src.includes('stream') || src.includes('video'))) {
+          addUnique({
+            name: 'Video',
+            resolution: 'Default',
+            iframeUrl: src,
+            type: 'stream',
+          }, streamServers, byQuality);
+        }
+      });
+    }
+
     res.json({
       status: true,
       creator: 'Gxyenn',
@@ -1275,7 +1340,40 @@ router.get('/anime-list', async (req, res) => {
 // ==================== SCHEDULE (Samehadaku) ====================
 router.get('/schedule', async (req, res) => {
   try {
-    const html = await fetchPage(`${BASE}/jadwal-rilis/`, BASE);
+    // Try multiple URL candidates for schedule page
+    const scheduleUrls = [
+      `${BASE}/jadwal-rilis/`,
+      `${BASE}/jadwal/`,
+      `${BASE}/schedule/`,
+      `${BASE}/release-schedule/`,
+    ];
+    let html = null;
+    for (const scheduleUrl of scheduleUrls) {
+      try {
+        html = await fetchPage(scheduleUrl, BASE);
+        if (html && !html.includes('404') && !html.includes('Not Found')) break;
+        html = null;
+      } catch { html = null; }
+    }
+
+    // Fallback: extract schedule from homepage sidebar if no dedicated page
+    if (!html) {
+      try {
+        html = await fetchPage(BASE, BASE);
+      } catch { /* ignore */ }
+    }
+
+    if (!html) {
+      return res.json({
+        status: true,
+        creator: 'Gxyenn',
+        source: 'samehadaku',
+        totalDays: 0,
+        message: 'Jadwal rilis tidak tersedia saat ini.',
+        data: {},
+      });
+    }
+
     const $ = cheerio.load(html);
     const schedule = {};
 
@@ -1312,7 +1410,8 @@ router.get('/schedule', async (req, res) => {
 
     // Method 2: Widget-based schedule (fallback)
     if (!Object.keys(schedule).length) {
-      $('.schedule-widget .day-schedule, .widget-schedule, [class*="schedule"] [class*="day"]').each((i, el) => {
+      // Also try homepage sidebar schedule widgets
+      $('[class*="schedul"], [id*="schedul"], .widget_schedule, .schedule-widget, .day-schedule').each((i, el) => {
         const day = $(el).find('h3, h4, .day-name, [class*="day"]').first().text().trim() || `Hari ${i + 1}`;
         const items = [];
 
@@ -1334,6 +1433,39 @@ router.get('/schedule', async (req, res) => {
         });
 
         if (items.length) schedule[day] = items;
+      });
+    }
+
+    // Method 3: Look for day headers (Senin/Selasa/Rabu etc) with anime lists
+    if (!Object.keys(schedule).length) {
+      const dayNames = ['Senin', 'Selasa', 'Rabu', 'Kamis', 'Jumat', 'Sabtu', 'Minggu',
+                        'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'];
+      $('h2, h3, h4, .day-header, .schedule-day, [class*="day"]').each((i, el) => {
+        const headerText = $(el).text().trim();
+        const isDay = dayNames.some(d => headerText.toLowerCase().includes(d.toLowerCase()));
+        if (!isDay) return;
+        
+        const items = [];
+        // Get the next sibling list/container
+        let nextEl = $(el).next();
+        for (let tries = 0; tries < 3 && nextEl.length; tries++) {
+          nextEl.find('a').each((j, a) => {
+            const href = $(a).attr('href') || '';
+            const img = $(a).find('img').length ? $(a).find('img') : nextEl.find('img').eq(j);
+            const title = $(a).text().trim() || $(a).attr('title') || '';
+            if (title && href.includes(BASE.replace('https://', ''))) {
+              items.push({
+                title,
+                slug: cleanSlug(href),
+                url: href,
+                poster: getPoster(img),
+              });
+            }
+          });
+          if (items.length > 0) break;
+          nextEl = nextEl.next();
+        }
+        if (items.length) schedule[headerText] = items;
       });
     }
 

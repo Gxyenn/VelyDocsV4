@@ -140,19 +140,35 @@ router.get('/home', async (req, res) => {
 
     const props = inertia.props;
 
-    // Featured / trending
-    const featured = Array.isArray(props.featured) ? props.featured : [];
-    const trending = featured.map(a => ({
+    // Featured / trending — try multiple possible prop names
+    const trendingSource = Array.isArray(props.featured) ? props.featured
+      : Array.isArray(props.trending) ? props.trending
+      : Array.isArray(props.trendingAnimes) ? props.trendingAnimes
+      : Array.isArray(props.trendingAnime) ? props.trendingAnime
+      : Array.isArray(props.hots) ? props.hots
+      : Array.isArray(props.hot) ? props.hot
+      : Array.isArray(props.slider) ? props.slider
+      : Array.isArray(props.banner) ? props.banner
+      : [];
+    const trending = trendingSource.map(a => ({
       title: a.title || '',
       slug: a.slug || '',
       poster: a.poster || '',
       rating: a.rating || '',
       type: a.type || '',
+      episodes_count: a.episodes_count || 0,
+      status: a.status || '',
       url: `${BASE}/anime/${a.slug || a.id}`,
     }));
 
-    // Latest updates — each anime may contain its latest episode
-    const latestRaw = Array.isArray(props.latestUpdates) ? props.latestUpdates : [];
+    // Latest updates — try multiple possible prop names
+    const latestRaw = Array.isArray(props.latestUpdates) ? props.latestUpdates
+      : Array.isArray(props.latest) ? props.latest
+      : Array.isArray(props.latestEpisodes) ? props.latestEpisodes
+      : Array.isArray(props.recentUpdates) ? props.recentUpdates
+      : Array.isArray(props.recent) ? props.recent
+      : Array.isArray(props.newEpisodes) ? props.newEpisodes
+      : [];
     const latest = latestRaw.map(a => {
       const latestEp = Array.isArray(a.episodes) && a.episodes.length
         ? a.episodes[a.episodes.length - 1]
@@ -937,16 +953,31 @@ router.get('/search', async (req, res) => {
 router.get('/movies', async (req, res) => {
   try {
     const page = parseInt(req.query.page) || 1;
-    const url = `${BASE}/movies?page=${page}`;
+    
+    // Try dedicated /movies page first, then fallback to /explore?type=Movie
+    const urlCandidates = [
+      `${BASE}/movies?page=${page}`,
+      `${BASE}/explore?type=Movie&page=${page}`,
+      `${BASE}/explore?type=movie&page=${page}`,
+    ];
 
-    const html = await fetchPage(url, BASE);
-    const inertia = extractInertia(html);
+    let inertia = null;
+    for (const url of urlCandidates) {
+      try {
+        const html = await fetchPage(url, BASE);
+        inertia = extractInertia(html);
+        if (inertia?.props?.animes) break;
+        inertia = null;
+      } catch { inertia = null; }
+    }
 
     if (!inertia || !inertia.props || !inertia.props.animes) {
-      return res.status(503).json({
-        status: false,
-        message: 'Failed to parse movies data',
+      return res.json({
+        status: true,
         creator: 'Gxyenn',
+        message: 'Movie page tidak tersedia. Gunakan /explore?type=Movie sebagai alternatif.',
+        pagination: buildPagination(page, 1, 0),
+        data: [],
       });
     }
 
@@ -1134,28 +1165,53 @@ router.get('/genre/:slug', async (req, res) => {
 // ==================== SEASONS ====================
 router.get('/seasons', async (req, res) => {
   try {
-    // Anichin has no /seasons page.
-    // Extract what we can from the explore page and return helpful info.
     const html = await fetchPage(`${BASE}/explore`, BASE);
     const inertia = extractInertia(html);
 
-    // Derive unique years from the anime data as a proxy for seasons
+    // Try to get seasons from Inertia props (filter options)
+    const seasons = inertia?.props?.seasons || inertia?.props?.filters?.seasons || [];
+    if (Array.isArray(seasons) && seasons.length > 0) {
+      return res.json({
+        status: true,
+        creator: 'Gxyenn',
+        total: seasons.length,
+        data: seasons.map(s => ({
+          id: s.id || null,
+          name: s.name || s.title || s.label || String(s),
+          slug: s.slug || String(s.id || s.name || s).toLowerCase().replace(/\s+/g, '-'),
+          url: `${BASE}/explore?season=${encodeURIComponent(s.slug || s.name || s)}`,
+        })),
+      });
+    }
+
+    // Fallback: derive unique years from anime data
     const animes = inertia?.props?.animes?.data || [];
     const yearsSet = new Set();
     animes.forEach(a => {
       if (a.release_year) yearsSet.add(a.release_year);
+      if (a.season) yearsSet.add(a.season);
     });
-    const years = [...yearsSet].sort((a, b) => b - a);
+    // Also check all props for any season-like arrays
+    for (const [key, val] of Object.entries(inertia?.props || {})) {
+      if (key.toLowerCase().includes('season') && Array.isArray(val)) {
+        val.forEach(s => {
+          if (typeof s === 'object' && s.name) yearsSet.add(s.name);
+          else if (typeof s === 'string') yearsSet.add(s);
+          else if (typeof s === 'number') yearsSet.add(s);
+        });
+      }
+    }
+    const years = [...yearsSet].sort((a, b) => String(b).localeCompare(String(a)));
 
     res.json({
       status: true,
       creator: 'Gxyenn',
-      message: 'Anichin does not have a dedicated seasons page. Use /explore with filters instead.',
+      message: years.length > 0 ? null : 'Season data limited. Use /explore with filters for more results.',
       total: years.length,
       data: years.map(y => ({
-        name: `Anime ${y}`,
-        slug: String(y),
-        url: `${BASE}/season/${y}`,
+        name: typeof y === 'number' ? `Anime ${y}` : String(y),
+        slug: String(y).toLowerCase().replace(/\s+/g, '-'),
+        url: `${BASE}/explore?season=${encodeURIComponent(y)}`,
       })),
     });
   } catch (e) {
